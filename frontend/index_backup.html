@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>LocalBank Teller Assistant</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f4f6f8;
+            padding: 40px;
+        }
+
+        .chatbox {
+            max-width: 700px;
+            margin: auto;
+            background: white;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 0 12px rgba(0,0,0,0.1);
+        }
+
+        h2 {
+            color: #0b5cab;
+        }
+
+        input, button {
+            width: 100%;
+            padding: 12px;
+            margin-top: 10px;
+            font-size: 16px;
+            box-sizing: border-box;
+        }
+
+        button {
+            background: #0b5cab;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+
+        .answer {
+            margin-top: 20px;
+            background: #eef5ff;
+            padding: 15px;
+            border-radius: 8px;
+            min-height: 60px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="chatbox">
+    <h2>LocalBank Teller Assistant</h2>
+
+    <label>Customer ID</label>
+    <input type="number" id="customerId" placeholder="Example: 1">
+
+    <label>Ask a question</label>
+    <input type="text" id="question" placeholder="Example: What is my LTV?">
+
+    <button type="button" onclick="askBot()">Ask</button>
+
+    <div class="answer" id="answer">
+        Your answer will appear here.
+    </div>
+</div>
+
+<script>
+async function askBot() {
+    const customerId = document.getElementById("customerId").value;
+    const question = document.getElementById("question").value;
+
+    if (!customerId || !question) {
+        document.getElementById("answer").innerText = "Please enter both Customer ID and a question.";
+        return;
+    }
+
+    const encodedQuestion = encodeURIComponent(question);
+
+    const response = await fetch(`http://127.0.0.1:5000/chat/${customerId}/${encodedQuestion}`);
+    const data = await response.json();
+
+    if (Array.isArray(data)) {
+        let text = "";
+
+        data.forEach(item => {
+            if (item.ltv_percent) {
+                text += `Loan Type: ${item.loan_type}\n`;
+                text += `Current Balance: $${item.current_balance}\n`;
+                text += `Collateral Value: $${item.collateral_value}\n`;
+                text += `Loan-to-Value: ${item.ltv_percent}%\n\n`;
+            } 
+            else if (item.remaining_due) {
+                text += `Loan Type: ${item.loan_type}\n`;
+                text += `Amount Due: $${item.amount_due}\n`;
+                text += `Amount Paid: $${item.amount_paid}\n`;
+                text += `Remaining Due: $${item.remaining_due}\n`;
+                text += `Due Date: ${item.due_date}\n\n`;
+            }
+            else if (item.account_type) {
+    text += `Account Type: ${item.account_type}\n`;
+    text += `Balance: $${item.balance}\n`;
+    text += `Status: ${item.status}\n\n`;
+}
+else if (item.remaining_loan_balance) {
+    text += `Loan Type: ${item.loan_type}\n`;
+    text += `Remaining Loan Balance: $${item.remaining_loan_balance}\n`;
+    text += `Collateral Value: $${item.collateral_value}\n`;
+    text += `Next Due Date: ${item.next_due_date}\n\n`;
+}
+else if (item.overdue_amount) {
+    text += `Loan Type: ${item.loan_type}\n`;
+    text += `Overdue Amount: $${item.overdue_amount}\n\n`;
+}
+else if (item.remaining_loan_balance) {
+    text += `Loan Type: ${item.loan_type}\n`;
+    text += `Remaining Loan Balance: $${item.remaining_loan_balance}\n`;
+    text += `Collateral Value: $${item.collateral_value}\n`;
+    text += `Next Due Date: ${item.next_due_date}\n\n`;
+}
+        });
+
+        document.getElementById("answer").innerText = text;
+    } else {
+        document.getElementById("answer").innerText = data.answer || "No answer found.";
+    }
+}
+</script>
+
+</body>
+</html>

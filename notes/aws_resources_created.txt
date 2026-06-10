@@ -1,0 +1,7 @@
+AWS Resources Created
+
+1. RDS MySQL database - pending
+2. RDS security group - pending
+3. Lambda function - pending
+4. API Gateway - pending
+5. CloudWatch logs - pending
