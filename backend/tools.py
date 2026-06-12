@@ -1,26 +1,45 @@
 from database import (
     search_customers,
+    list_customers,
     get_accounts,
     get_loans,
     get_payments,
     get_collateral,
     get_overdue_customers,
     get_due_soon_customers,
+    get_due_today_customers,
+    get_due_tomorrow_customers,
+    get_due_this_week_customers,
     get_missed_payments,
     get_high_risk_loans,
     get_collateral_at_risk,
     get_today_priorities,
+    get_customer_count,
+    get_loan_count,
+    get_account_count,
+    get_total_overdue_amount,
+    get_total_portfolio_balance,
+    get_portfolio_summary,
     resolve_customer_id,
     get_customer,
 )
-from intent import is_reserved_customer_name, is_customer_summary_intent, extract_customer_id
+from intent import (
+    is_reserved_customer_name,
+    is_customer_summary_intent,
+    extract_customer_id,
+    payment_due_tool_for_phrase,
+)
 
 TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
             "name": "search_customers",
-            "description": "Find customers by partial or full name. Do NOT use for words like 'priorities' or 'today' — use get_today_priorities for daily follow-up questions.",
+            "description": (
+                "Find customers by partial or full name. Do NOT use for payment due queries "
+                "(due today, due tomorrow, due this week, due soon) or daily priorities — "
+                "use the matching get_due_* or get_today_priorities tools instead."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {"name": {"type": "string"}},
@@ -106,6 +125,30 @@ TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
+            "name": "get_due_today_customers",
+            "description": "List customers with unpaid payments due today (CURDATE()).",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_due_tomorrow_customers",
+            "description": "List customers with unpaid payments due tomorrow.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_due_this_week_customers",
+            "description": "List customers with unpaid payments due through the end of this week.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_missed_payments",
             "description": "List customers who missed monthly payments.",
             "parameters": {"type": "object", "properties": {}},
@@ -144,6 +187,70 @@ TOOL_DEFINITIONS = [
                 "Use ONLY for explicit daily planning questions such as who to call today, "
                 "what to do today, morning follow-up lists, today's workload, or what to focus on today. "
                 "Do NOT use for overdue-only, high-risk-only, collateral, or single-customer questions."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_customers",
+            "description": "List customers on file when no specific search name is provided.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "description": "Maximum customers to return, default 50"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_customer_count",
+            "description": "Return the total number of customers in the portfolio.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_loan_count",
+            "description": "Return the total number of active loans in the portfolio.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_account_count",
+            "description": "Return the total number of customer accounts on file.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_total_overdue_amount",
+            "description": "Return the total overdue payment amount and count of overdue customers.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_total_portfolio_balance",
+            "description": "Return total loan balances, account balances, and combined portfolio balance.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_portfolio_summary",
+            "description": (
+                "Return a portfolio-wide business snapshot: customer, loan, and account counts, "
+                "total balances, overdue exposure, due-soon count, and high-risk loan count."
             ),
             "parameters": {"type": "object", "properties": {}},
         },
@@ -220,9 +327,18 @@ def execute_tool(name: str, arguments: dict, *, allow_high_risk: bool = True):
         return {"error": "Do not search by name when customer_id is provided."}
 
     if name == "search_customers":
-        if is_reserved_customer_name(args["name"]):
+        query_name = str(args.get("name") or "").strip()
+        if not query_name:
+            return list_customers(int(args.get("limit", 50)))
+        payment_tool = payment_due_tool_for_phrase(query_name)
+        if payment_tool:
+            return execute_tool(payment_tool, {})
+        if is_reserved_customer_name(query_name):
             return get_today_priorities()
-        return search_customers(args["name"])
+        return search_customers(query_name)
+
+    if name == "list_customers":
+        return list_customers(int(args.get("limit", 50)))
 
     if name in ("get_customer_accounts", "get_customer_loans", "get_customer_payments", "get_customer_collateral"):
         customer_id, err = _resolve_id(args)
@@ -239,10 +355,19 @@ def execute_tool(name: str, arguments: dict, *, allow_high_risk: bool = True):
     dispatch = {
         "get_overdue_customers": get_overdue_customers,
         "get_due_soon_customers": get_due_soon_customers,
+        "get_due_today_customers": get_due_today_customers,
+        "get_due_tomorrow_customers": get_due_tomorrow_customers,
+        "get_due_this_week_customers": get_due_this_week_customers,
         "get_missed_payments": get_missed_payments,
         "get_high_risk_loans": lambda: get_high_risk_loans(args.get("ltv_threshold", 75.0)),
         "get_collateral_at_risk": get_collateral_at_risk,
         "get_today_priorities": get_today_priorities,
+        "get_customer_count": get_customer_count,
+        "get_loan_count": get_loan_count,
+        "get_account_count": get_account_count,
+        "get_total_overdue_amount": get_total_overdue_amount,
+        "get_total_portfolio_balance": get_total_portfolio_balance,
+        "get_portfolio_summary": get_portfolio_summary,
     }
 
     if name in dispatch:

@@ -1,46 +1,145 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>TellerIQ | Pawnshop Operations Copilot</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TellerIQ | Banking Operations Copilot</title>
     <style>
         body {
-            font-family: "Segoe UI", Arial, sans-serif;
-            background: #eef2f7;
+            font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Arial, sans-serif;
+            background: #f1f5f9;
             margin: 0;
-            padding: 32px 20px;
-            color: #1f2937;
+            padding: 28px 20px 40px;
+            color: #1e293b;
+            line-height: 1.5;
         }
 
         .container {
-            max-width: 920px;
+            max-width: 1080px;
             margin: auto;
         }
 
         .header {
-            background: linear-gradient(135deg, #0b5cab 0%, #084b8f 100%);
+            background: linear-gradient(135deg, #0b5cab 0%, #063d73 100%);
             color: white;
-            padding: 24px 28px;
-            border-radius: 16px 16px 0 0;
-            box-shadow: 0 4px 14px rgba(11, 92, 171, 0.18);
+            padding: 28px 32px;
+            border-radius: 20px 20px 0 0;
+            box-shadow: 0 8px 24px rgba(11, 92, 171, 0.22);
+        }
+
+        .header-top {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 16px;
         }
 
         .header h1 {
             margin: 0;
-            font-size: 30px;
-            letter-spacing: -0.5px;
+            font-size: 28px;
+            font-weight: 700;
+            letter-spacing: -0.03em;
+        }
+
+        .header-tag {
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+            background: rgba(255, 255, 255, 0.14);
+            border: 1px solid rgba(255, 255, 255, 0.22);
+            padding: 8px 14px;
+            border-radius: 10px;
+            white-space: nowrap;
+        }
+
+        .header-tag-divider {
+            opacity: 0.55;
+            margin: 0 6px;
         }
 
         .header p {
-            margin: 8px 0 0;
-            font-size: 14px;
-            opacity: 0.92;
+            margin: 10px 0 0;
+            font-size: 15px;
+            opacity: 0.9;
+            max-width: 640px;
         }
 
         .chatbox {
             background: white;
-            padding: 24px;
-            border-radius: 0 0 16px 16px;
-            box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+            padding: 28px 32px 32px;
+            border-radius: 0 0 20px 20px;
+            box-shadow: 0 12px 40px rgba(15, 23, 42, 0.07);
+        }
+
+        .dashboard-stats {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+            margin-bottom: 28px;
+        }
+
+        .stat-card {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 16px;
+            padding: 18px 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            transition: box-shadow 0.2s ease, transform 0.2s ease;
+            cursor: pointer;
+            text-align: left;
+            font: inherit;
+            color: inherit;
+        }
+
+        .stat-card:hover {
+            box-shadow: 0 6px 20px rgba(15, 23, 42, 0.08);
+            transform: translateY(-2px);
+        }
+
+        .stat-card:focus-visible {
+            outline: 2px solid #0b5cab;
+            outline-offset: 2px;
+        }
+
+        .stat-card:active {
+            transform: translateY(0);
+        }
+
+        .stat-label {
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: #64748b;
+        }
+
+        .stat-value {
+            font-size: 32px;
+            font-weight: 700;
+            color: #0f172a;
+            letter-spacing: -0.02em;
+            line-height: 1.1;
+        }
+
+        .stat-value.loading {
+            color: #94a3b8;
+            font-size: 24px;
+        }
+
+        .stat-card.stat-customers { border-top: 3px solid #0b5cab; }
+        .stat-card.stat-overdue { border-top: 3px solid #dc2626; }
+        .stat-card.stat-risk { border-top: 3px solid #ea580c; }
+        .stat-card.stat-collateral { border-top: 3px solid #7c3aed; }
+
+        button.stat-card {
+            appearance: none;
+            -webkit-appearance: none;
+        }
+
+        .workspace-section {
+            margin-bottom: 24px;
         }
 
         .section-label {
@@ -111,13 +210,13 @@
         }
 
         .answer {
-            margin-top: 22px;
-            background: #f8fbff;
-            border: 1px solid #dbe7f5;
-            padding: 18px;
-            border-radius: 14px;
-            min-height: 120px;
-            max-height: 560px;
+            margin-top: 8px;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            padding: 20px;
+            border-radius: 16px;
+            min-height: 140px;
+            max-height: 620px;
             overflow-y: auto;
         }
 
@@ -150,20 +249,37 @@
         }
 
         .copilot-panel {
-            background: white;
-            border: 1px solid #e2e8f0;
-            border-radius: 14px;
-            overflow: hidden;
-            box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+            background: transparent;
+            border: none;
+            border-radius: 0;
+            overflow: visible;
+            box-shadow: none;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
         }
 
         .query-header {
-            padding: 14px 18px 12px;
+            padding: 14px 18px;
             font-size: 13px;
             font-weight: 600;
-            color: #475569;
-            letter-spacing: 0.01em;
+            color: #64748b;
+            letter-spacing: 0.02em;
             line-height: 1.4;
+            background: white;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+        }
+
+        .query-header::before {
+            content: "Question";
+            display: block;
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: #94a3b8;
+            margin-bottom: 4px;
         }
 
         .copilot-body {
@@ -270,6 +386,53 @@
             border: 1px solid #bfdbfe;
         }
 
+        .badge-paid,
+        .status-badge.status-paid,
+        .status-badge.status-current {
+            background: #ecfdf5;
+            color: #047857;
+            border: 1px solid #a7f3d0;
+        }
+
+        .status-badge {
+            display: inline-block;
+            border-radius: 999px;
+            font-size: 11px;
+            font-weight: 700;
+            padding: 4px 10px;
+            white-space: nowrap;
+        }
+
+        .status-badge.status-overdue {
+            background: #fef2f2;
+            color: #b91c1c;
+            border: 1px solid #fecaca;
+        }
+
+        .status-badge.status-due-soon {
+            background: #fffbeb;
+            color: #b45309;
+            border: 1px solid #fde68a;
+        }
+
+        .status-badge.status-high-risk {
+            background: #fff7ed;
+            color: #c2410c;
+            border: 1px solid #fed7aa;
+        }
+
+        .status-badge.status-neutral {
+            background: #f1f5f9;
+            color: #475569;
+            border: 1px solid #e2e8f0;
+        }
+
+        .results-table .col-status {
+            width: 110px;
+            text-align: center;
+            white-space: nowrap;
+        }
+
         .card-field {
             display: flex;
             flex-direction: column;
@@ -320,25 +483,110 @@
             box-shadow: 0 4px 14px rgba(11, 92, 171, 0.08);
         }
 
-        .action-banner-title {
-            font-size: 12px;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 0.04em;
-            color: #0b5cab;
-            margin-bottom: 6px;
-        }
-
         .action-banner-text {
-            font-size: 15px;
+            font-size: 16px;
             font-weight: 700;
             color: #111827;
+            line-height: 1.4;
         }
 
         .action-banner-detail {
             font-size: 13px;
             color: #475569;
+            margin-top: 8px;
+            line-height: 1.5;
+        }
+
+        .action-reason-label {
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: #64748b;
+            margin-right: 6px;
+        }
+
+        .action-banner-metrics {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 12px;
+            margin-top: 14px;
+            padding-top: 14px;
+            border-top: 1px solid #dbeafe;
+        }
+
+        .action-banner-metrics .field-value {
+            white-space: nowrap;
+        }
+
+        .action-banner-kpis {
+            display: grid;
+            gap: 8px;
+            margin-top: 14px;
+            padding-top: 14px;
+            border-top: 1px solid #bbf7d0;
+        }
+
+        .kpi-row {
+            display: flex;
+            align-items: baseline;
+            gap: 8px;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+
+        .kpi-label {
+            flex: 0 0 148px;
+            font-weight: 600;
+            color: #475569;
+        }
+
+        .kpi-value {
+            color: #1e293b;
+        }
+
+        .kpi-value-highlight {
+            color: #b91c1c;
+            font-weight: 700;
+        }
+
+        .business-summary {
+            font-size: 15px;
+            line-height: 1.6;
+            color: #1f2937;
+            margin: 0;
+        }
+
+        .gemini-unavailable-intro {
+            color: #b45309;
+            font-weight: 600;
+        }
+
+        .fallback-footnote {
+            color: #64748b;
+            font-size: 14px;
             margin-top: 4px;
+        }
+
+        .portfolio-status-intro {
+            font-size: 14px;
+            color: #334155;
+            margin: 0 0 8px;
+        }
+
+        .portfolio-status-list {
+            margin: 0 0 4px 18px;
+            padding: 0;
+            color: #475569;
+            font-size: 14px;
+            line-height: 1.55;
+        }
+
+        .view-card-body .action-banner {
+            border: none;
+            box-shadow: none;
+            padding: 0;
+            background: transparent;
         }
 
         .empty-message {
@@ -367,11 +615,296 @@
             margin: 12px 18px 0;
         }
 
+        .view-card {
+            margin: 0;
+            background: #fff;
+            border: 1px solid #e2e8f0;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 4px 16px rgba(15, 23, 42, 0.04);
+        }
+
+        .view-card.hidden {
+            display: none;
+        }
+
+        .view-card-action {
+            border-left: 4px solid #16a34a;
+        }
+
+        .view-card-action .view-card-title {
+            background: linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%);
+            color: #15803d;
+        }
+
+        .view-card-action .view-card-body {
+            padding: 20px 22px;
+        }
+
+        .view-card-action .action-banner-text {
+            font-size: 18px;
+        }
+
+        .view-card-summary {
+            border-left: 4px solid #0b5cab;
+        }
+
+        .view-card-summary .view-card-title {
+            background: linear-gradient(135deg, #eff6ff 0%, #f8fafc 100%);
+            color: #0b5cab;
+        }
+
+        .view-card-summary .view-card-body {
+            padding: 20px 22px;
+        }
+
+        .view-card-summary .business-summary {
+            font-size: 15px;
+            line-height: 1.7;
+            color: #334155;
+        }
+
+        .view-card-results {
+            border-left: 4px solid #6366f1;
+        }
+
+        .view-card-results .view-card-title {
+            background: linear-gradient(135deg, #eef2ff 0%, #f8fafc 100%);
+            color: #4338ca;
+        }
+
+        .view-card-results .view-card-body {
+            padding: 16px 18px 18px;
+        }
+
+        .view-card-details {
+            border-left: 4px solid #64748b;
+            background: #f8fafc;
+            box-shadow: none;
+        }
+
+        .view-card-details .view-card-title {
+            background: #eef2f6;
+            color: #475569;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 10px;
+            letter-spacing: 0.1em;
+        }
+
+        .view-card-details .view-card-body {
+            padding: 14px 18px 18px;
+            background: #fafbfc;
+        }
+
+        .view-card-details .detail-label {
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: #64748b;
+        }
+
+        .view-card-details .query-sql {
+            background: #0f172a;
+            border-color: #1e293b;
+            color: #e2e8f0;
+        }
+
+        .query-details-toggle {
+            margin: 0;
+            width: 100%;
+            background: #f8fafc;
+            color: #64748b;
+            border: 1px dashed #cbd5e1;
+            border-radius: 10px;
+            font-size: 12px;
+            font-weight: 600;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            padding: 10px 14px;
+            transition: background 0.15s ease, color 0.15s ease;
+        }
+
+        .query-details-toggle:hover {
+            background: #f1f5f9;
+            color: #334155;
+            border-color: #94a3b8;
+        }
+
+        .view-card-title {
+            padding: 14px 20px;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .view-card-body {
+            padding: 16px 20px;
+            font-size: 14px;
+            color: #334155;
+        }
+
+        .view-card-body .action-banner-metrics {
+            border-top-color: #dcfce7;
+        }
+
+        .detail-field {
+            margin-bottom: 14px;
+        }
+
+        .detail-field:last-child {
+            margin-bottom: 0;
+        }
+
+        .detail-label {
+            font-size: 13px;
+            font-weight: 600;
+            color: #475569;
+            margin-bottom: 4px;
+        }
+
+        .detail-value {
+            color: #1f2937;
+        }
+
+        .detail-value.mono {
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .detail-subtitle {
+            font-size: 13px;
+            font-weight: 600;
+            color: #0b5cab;
+            margin: 12px 0 8px;
+        }
+
+        .detail-subtitle:first-child {
+            margin-top: 0;
+        }
+
+        .tables-used-list {
+            margin: 0;
+            padding-left: 18px;
+        }
+
+        .query-sql {
+            background: #f8fbff;
+            border: 1px solid #e2ebf7;
+            border-radius: 8px;
+            padding: 10px 12px;
+            overflow-x: auto;
+            margin: 0;
+            font-size: 12px;
+        }
+
+        .results-table-wrap {
+            overflow-x: auto;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            background: white;
+        }
+
+        .results-table-wrap + .results-table-wrap,
+        .detail-subtitle + .results-table-wrap {
+            margin-top: 10px;
+        }
+
+        .results-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        .results-table th,
+        .results-table td {
+            padding: 8px 12px;
+            border-bottom: 1px solid #e8eef5;
+            text-align: left;
+        }
+
+        .results-table th {
+            background: #f8fafc;
+            color: #475569;
+            font-weight: 700;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            white-space: nowrap;
+        }
+
+        .results-table tbody tr:hover {
+            background: #f8fafc;
+        }
+
+        .results-table td {
+            color: #334155;
+        }
+
+        .results-table tr:last-child td,
+        .results-table tr:last-child th {
+            border-bottom: none;
+        }
+
+        .results-table th.cell-date,
+        .results-table th.cell-currency,
+        .results-table th.cell-percent,
+        .results-table th.cell-phone,
+        .results-table th.cell-name {
+            text-align: center;
+        }
+
+        .results-table th.cell-name {
+            text-align: left;
+        }
+
+        .results-table .cell-date {
+            white-space: nowrap;
+            text-align: center;
+        }
+
+        .results-table .cell-currency,
+        .results-table .cell-percent,
+        .results-table .cell-phone {
+            text-align: center;
+            white-space: nowrap;
+        }
+
+        .results-table .cell-name {
+            white-space: nowrap;
+            text-align: left;
+        }
+
+        .results-empty {
+            padding: 12px;
+            color: #64748b;
+            font-size: 13px;
+        }
+
+        .copilot-body {
+            padding: 0;
+        }
+
         .footer {
             text-align: center;
-            margin-top: 14px;
+            margin-top: 24px;
+            padding-top: 8px;
+        }
+
+        .footer-brand {
+            font-size: 13px;
+            font-weight: 700;
+            color: #475569;
+            letter-spacing: 0.01em;
+        }
+
+        .footer-powered {
+            margin-top: 4px;
             font-size: 12px;
-            color: #64748b;
+            color: #94a3b8;
+            letter-spacing: 0.02em;
         }
 
         .tiq-response {
@@ -502,7 +1035,25 @@
             height: 10px;
         }
 
+        @media (max-width: 900px) {
+            .dashboard-stats {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+
         @media (max-width: 700px) {
+            .dashboard-stats {
+                grid-template-columns: 1fr;
+            }
+
+            .header-top {
+                flex-direction: column;
+            }
+
+            .chatbox {
+                padding: 20px 18px 24px;
+            }
+
             .quick-buttons {
                 grid-template-columns: 1fr;
             }
@@ -526,39 +1077,71 @@
 
 <div class="container">
     <div class="header">
-        <h1>TellerIQ</h1>
-        <p>Pawnshop Operations Copilot for loan follow-ups, risk, and collateral tracking</p>
+        <div class="header-top">
+            <div>
+                <h1>TellerIQ</h1>
+                <p>Banking operations copilot for loan follow-ups, portfolio risk, and collateral tracking.</p>
+            </div>
+            <span class="header-tag" id="portfolioStatus">
+                Portfolio Status<span class="header-tag-divider">|</span><span id="headerDate"></span>
+            </span>
+        </div>
     </div>
 
     <div class="chatbox">
-        <div class="section-label">Quick Widgets</div>
-
-        <div class="quick-buttons">
-            <button type="button" onclick="loadTodayPriorities()">Today's Priorities</button>
-            <button type="button" onclick="loadDueSoon()">Due Soon</button>
-            <button type="button" onclick="loadOverdue()">Overdue Customers</button>
-            <button type="button" onclick="loadMissedPayments()">Missed Payments</button>
-            <button type="button" onclick="loadHighRiskLoans()">High Risk Loans</button>
-            <button type="button" onclick="loadCollateralAtRisk()">Collateral At Risk</button>
+        <div class="dashboard-stats" id="dashboardStats">
+            <button type="button" class="stat-card stat-customers" onclick="loadCustomerCount()" aria-label="View customer count">
+                <span class="stat-label">Total Customers</span>
+                <span class="stat-value loading" id="statCustomers">N/A</span>
+            </button>
+            <button type="button" class="stat-card stat-overdue" onclick="loadOverdue()" aria-label="Show overdue customers">
+                <span class="stat-label">Overdue Accounts</span>
+                <span class="stat-value loading" id="statOverdue">N/A</span>
+            </button>
+            <button type="button" class="stat-card stat-risk" onclick="loadHighRiskLoans()" aria-label="Show high risk loans">
+                <span class="stat-label">High Risk Loans</span>
+                <span class="stat-value loading" id="statHighRisk">N/A</span>
+            </button>
+            <button type="button" class="stat-card stat-collateral" onclick="loadCollateralAtRisk()" aria-label="Show collateral at risk">
+                <span class="stat-label">Collateral At Risk</span>
+                <span class="stat-value loading" id="statCollateral">N/A</span>
+            </button>
         </div>
 
-        <div class="input-row">
-            <input type="text" id="userQuestion" placeholder="Ask: who should I call today?">
-            <button class="send-btn" type="button" onclick="sendQuestion()">Send</button>
+        <div class="workspace-section">
+            <div class="section-label">Quick Actions</div>
+
+            <div class="quick-buttons">
+                <button type="button" onclick="loadTodayPriorities()">Today's Priorities</button>
+                <button type="button" onclick="loadDueSoon()">Due Soon</button>
+                <button type="button" onclick="loadOverdue()">Overdue Customers</button>
+                <button type="button" onclick="loadMissedPayments()">Missed Payments</button>
+                <button type="button" onclick="loadHighRiskLoans()">High Risk Loans</button>
+                <button type="button" onclick="loadCollateralAtRisk()">Collateral At Risk</button>
+            </div>
+
+            <div class="input-row">
+                <input type="text" id="userQuestion" placeholder="Who should I call first today?">
+                <button class="send-btn" type="button" onclick="sendQuestion()">Send</button>
+            </div>
         </div>
 
-        <div class="answer" id="answer">
-            <div class="empty-state" id="emptyState">
-                <div class="empty-title">Ready to review today's priorities</div>
-                <div class="empty-text">
-                    Ask a question in plain English or use a quick widget. TellerIQ returns structured, banker-friendly responses from live MySQL data.
+        <div class="workspace-section">
+            <div class="section-label">Copilot Response</div>
+            <div class="answer" id="answer">
+                <div class="empty-state" id="emptyState">
+                    <div class="empty-title">Ready to review today's priorities</div>
+                    <div class="empty-text">
+                        Ask a question in plain English or pick a quick action. TellerIQ returns structured, banker-friendly responses from live portfolio data.
+                    </div>
                 </div>
             </div>
         </div>
     </div>
 
     <div class="footer">
-        LLM-powered demo built with HTML, JavaScript, Flask, OpenAI, and MySQL (telleriq_db).
+        <div class="footer-brand">TellerIQ Banking Operations Copilot</div>
+        <div class="footer-powered">Powered by Gemini, Flask, and MySQL</div>
     </div>
 </div>
 
@@ -567,8 +1150,694 @@ const API_BASE = "http://127.0.0.1:5000";
 const conversationHistory = [];
 const DEBUG_MODE = new URLSearchParams(window.location.search).get("debug") === "1";
 
+const PLACEHOLDER_EXAMPLES = [
+    "Who should I call first today?",
+    "Show overdue customers.",
+    "Summarize customer 1.",
+    "What collateral is at risk?",
+    "Show high-risk loans.",
+];
+let placeholderIndex = 0;
+const DISPLAY_PLACEHOLDER = "N/A";
+
+const MOJIBAKE_REPLACEMENTS = [
+    ["â€”", "N/A"],
+    ["â€“", "-"],
+    ["â€œ", '"'],
+    ["â€\u009d", '"'],
+    ["â€™", "'"],
+    ["â€˜", "'"],
+];
+
+function sanitizeDisplayText(value) {
+    if (value === null || value === undefined) {
+        return DISPLAY_PLACEHOLDER;
+    }
+
+    let text = String(value).trim();
+    if (text === "") {
+        return DISPLAY_PLACEHOLDER;
+    }
+
+    MOJIBAKE_REPLACEMENTS.forEach(([bad, good]) => {
+        text = text.split(bad).join(good);
+    });
+
+    if (text === "\u2014" || text === "\u2013" || text === DISPLAY_PLACEHOLDER) {
+        return DISPLAY_PLACEHOLDER;
+    }
+
+    return text;
+}
+
+function escapeHtml(value) {
+    return sanitizeDisplayText(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+}
+
+const EMPTY_MESSAGE_REPLACEMENTS = [
+    ["Try a different search term.", "Refine the customer name or account number and try again."],
+    ["No high-LTV loans found.", "No high-risk loans currently require review."],
+    ["No high-risk loan review needed.", "Portfolio LTV levels are within normal review thresholds."],
+    ["No rows returned.", "No matching records found for this portfolio view."],
+];
+
+function polishReplyCopy(reply) {
+    if (!reply) {
+        return reply;
+    }
+    let polished = reply;
+    MOJIBAKE_REPLACEMENTS.forEach(([from, to]) => {
+        polished = polished.split(from).join(to);
+    });
+    EMPTY_MESSAGE_REPLACEMENTS.forEach(([from, to]) => {
+        polished = polished.split(from).join(to);
+    });
+    return polished;
+}
+
+function setHeaderDate() {
+    const headerDate = document.getElementById("headerDate");
+    if (!headerDate) {
+        return;
+    }
+    headerDate.textContent = new Date().toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+    });
+}
+
+function rotatePlaceholder() {
+    const input = document.getElementById("userQuestion");
+    if (!input || document.activeElement === input || input.value.trim()) {
+        return;
+    }
+    placeholderIndex = (placeholderIndex + 1) % PLACEHOLDER_EXAMPLES.length;
+    input.placeholder = PLACEHOLDER_EXAMPLES[placeholderIndex];
+}
+
+function startPlaceholderRotation() {
+    const input = document.getElementById("userQuestion");
+    if (input) {
+        input.placeholder = PLACEHOLDER_EXAMPLES[0];
+    }
+    setInterval(rotatePlaceholder, 4000);
+}
+
 function clearAnswer() {
     document.getElementById("answer").innerHTML = "";
+}
+
+function titleCaseLabel(value) {
+    return String(value ?? "")
+        .replace(/_/g, " ")
+        .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function formatDisplayDate(value) {
+    if (value === null || value === undefined || value === "") {
+        return DISPLAY_PLACEHOLDER;
+    }
+    const raw = sanitizeDisplayText(value);
+    if (raw === DISPLAY_PLACEHOLDER) {
+        return DISPLAY_PLACEHOLDER;
+    }
+    const isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    const parsed = isoMatch
+        ? new Date(Number(isoMatch[1]), Number(isoMatch[2]) - 1, Number(isoMatch[3]))
+        : new Date(raw);
+    if (Number.isNaN(parsed.getTime())) {
+        return sanitizeDisplayText(raw);
+    }
+    return parsed.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+    });
+}
+
+function formatDisplayMoney(value) {
+    const amount = Number(value);
+    if (Number.isNaN(amount)) {
+        return sanitizeDisplayText(value);
+    }
+    return amount.toLocaleString("en-US", {
+        style: "currency",
+        currency: "USD",
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+    });
+}
+
+function formatDisplayLtv(value) {
+    const amount = Number(value);
+    if (Number.isNaN(amount)) {
+        return sanitizeDisplayText(value);
+    }
+    return `${amount.toFixed(2)}%`;
+}
+
+function formatDisplayPhone(value) {
+    const digits = String(value ?? "").replace(/\D/g, "");
+    if (digits.length === 10) {
+        return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+    }
+    return sanitizeDisplayText(value);
+}
+
+const DATE_COLUMNS = new Set(["due_date", "next_due_date", "forfeiture_date"]);
+
+const CURRENCY_COLUMNS = new Set([
+    "balance",
+    "current_balance",
+    "amount_due",
+    "amount_paid",
+    "remaining_due",
+    "missed_amount",
+    "appraised_value",
+    "collateral_value",
+    "total_overdue",
+    "loan_balance",
+    "account_balance",
+    "total_balance",
+    "value",
+    "principal",
+    "interest",
+    "fee",
+    "payment_amount",
+    "loan_amount",
+]);
+
+const CURRENCY_COLUMN_PATTERN = /(?:^|_)(amount|balance|overdue|paid|remaining|appraised|missed|value|principal|interest|fee|payment)(?:$|_)/;
+
+function isDateColumn(column) {
+    const normalized = String(column).toLowerCase();
+    return DATE_COLUMNS.has(normalized) || normalized.endsWith("_date");
+}
+
+function isLtvColumn(column) {
+    const normalized = String(column).toLowerCase();
+    return normalized === "ltv_percent"
+        || normalized === "ltv"
+        || normalized.endsWith("_percent")
+        || normalized.endsWith("_pct");
+}
+
+function isPhoneColumn(column) {
+    const normalized = String(column).toLowerCase();
+    return normalized === "phone" || normalized.endsWith("_phone") || normalized.includes("phone");
+}
+
+function isNameColumn(column) {
+    const normalized = String(column).toLowerCase();
+    return normalized === "name"
+        || normalized === "full_name"
+        || normalized === "customer_name"
+        || normalized.endsWith("_name");
+}
+
+function isCurrencyColumn(column) {
+    const normalized = String(column).toLowerCase();
+    if (isDateColumn(normalized) || isLtvColumn(normalized)) {
+        return false;
+    }
+    if (normalized.endsWith("_count") || normalized === "count") {
+        return false;
+    }
+    if (CURRENCY_COLUMNS.has(normalized)) {
+        return true;
+    }
+    return CURRENCY_COLUMN_PATTERN.test(normalized);
+}
+
+function columnClassAttr(column) {
+    const classes = [];
+    if (isDateColumn(column)) {
+        classes.push("cell-date");
+    }
+    if (isCurrencyColumn(column)) {
+        classes.push("cell-currency");
+    }
+    if (isLtvColumn(column)) {
+        classes.push("cell-percent");
+    }
+    if (isPhoneColumn(column)) {
+        classes.push("cell-phone");
+    }
+    if (isNameColumn(column)) {
+        classes.push("cell-name");
+    }
+    return classes.length ? ` class="${classes.join(" ")}"` : "";
+}
+
+function formatCellValue(column, value) {
+    if (value === null || value === undefined || value === "") {
+        return DISPLAY_PLACEHOLDER;
+    }
+    if (isDateColumn(column)) {
+        return formatDisplayDate(value);
+    }
+    if (isLtvColumn(column)) {
+        return formatDisplayLtv(value);
+    }
+    if (isCurrencyColumn(column)) {
+        return formatDisplayMoney(value);
+    }
+    if (isPhoneColumn(column)) {
+        return formatDisplayPhone(value);
+    }
+    return sanitizeDisplayText(value);
+}
+
+function renderStatusBadge(status) {
+    if (!status || !status.label) {
+        return escapeHtml(DISPLAY_PLACEHOLDER);
+    }
+    const label = sanitizeDisplayText(status.label);
+    if (label === DISPLAY_PLACEHOLDER) {
+        return escapeHtml(DISPLAY_PLACEHOLDER);
+    }
+    return `<span class="status-badge status-${status.key}">${escapeHtml(label)}</span>`;
+}
+
+function normalizeStatusKey(label) {
+    const normalized = String(label || "").toLowerCase();
+    if (normalized.includes("overdue")) {
+        return "overdue";
+    }
+    if (normalized.includes("due soon")) {
+        return "due-soon";
+    }
+    if (normalized.includes("high risk")) {
+        return "high-risk";
+    }
+    if (normalized.includes("current") || normalized.includes("paid")) {
+        return "current";
+    }
+    return null;
+}
+
+function inferRowStatus(row) {
+    if (row.priority_status) {
+        const key = normalizeStatusKey(row.priority_status);
+        if (key) {
+            return { key, label: row.priority_status };
+        }
+    }
+
+    const amountDue = Number(row.amount_due);
+    const amountPaid = Number(row.amount_paid);
+    if (!Number.isNaN(amountDue) && !Number.isNaN(amountPaid) && amountDue > 0) {
+        if (amountPaid >= amountDue) {
+            return { key: "current", label: "Current" };
+        }
+
+        const dueRaw = row.due_date || row.next_due_date;
+        if (dueRaw) {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const dueDate = new Date(String(dueRaw).slice(0, 10));
+            dueDate.setHours(0, 0, 0, 0);
+            if (!Number.isNaN(dueDate.getTime())) {
+                if (dueDate < today) {
+                    return { key: "overdue", label: "Overdue" };
+                }
+                return { key: "due-soon", label: "Due Soon" };
+            }
+        }
+    }
+
+    const ltv = Number(row.ltv_percent ?? row.ltv);
+    if (!Number.isNaN(ltv) && ltv >= 75) {
+        return { key: "high-risk", label: "High Risk" };
+    }
+
+    return null;
+}
+
+function renderDataTable(rows) {
+    if (!rows || rows.length === 0) {
+        return '<div class="results-empty">No rows returned.</div>';
+    }
+
+    const showStatusColumn = rows.some((row) => inferRowStatus(row));
+    let columns = Object.keys(rows[0]);
+    if (showStatusColumn && columns.includes("priority_status")) {
+        columns = columns.filter((column) => column !== "priority_status");
+    }
+
+    const headerCells = showStatusColumn
+        ? `<th class="col-status">Status</th>${columns.map((column) =>
+            `<th${columnClassAttr(column)}>${escapeHtml(titleCaseLabel(column))}</th>`
+        ).join("")}`
+        : columns.map((column) =>
+            `<th${columnClassAttr(column)}>${escapeHtml(titleCaseLabel(column))}</th>`
+        ).join("");
+
+    const body = rows.map((row) => {
+        const statusCell = showStatusColumn
+            ? `<td class="col-status">${renderStatusBadge(inferRowStatus(row))}</td>`
+            : "";
+        const cells = columns.map((column) =>
+            `<td${columnClassAttr(column)}>${escapeHtml(formatCellValue(column, row[column]))}</td>`
+        ).join("");
+        return `<tr>${statusCell}${cells}</tr>`;
+    }).join("");
+
+    return `
+        <table class="results-table">
+            <thead><tr>${headerCells}</tr></thead>
+            <tbody>${body}</tbody>
+        </table>
+    `;
+}
+
+function renderResultsTable(rows) {
+    return renderDataTable(rows);
+}
+
+function getPrimaryQuery(queryDetails) {
+    const queries = ((queryDetails && queryDetails.queries) || [])
+        .filter((query) => query.rows && query.rows.length > 0);
+    return queries.length ? queries[0] : null;
+}
+
+function extractReasonFromBannerHtml(html) {
+    const container = document.createElement("div");
+    container.innerHTML = html || "";
+    const detail = container.querySelector(".action-banner-detail");
+    if (!detail) {
+        return "";
+    }
+    const clone = detail.cloneNode(true);
+    clone.querySelector(".action-reason-label")?.remove();
+    return clone.textContent.trim();
+}
+
+function parseMetricFromBannerHtml(html, label) {
+    const container = document.createElement("div");
+    container.innerHTML = html || "";
+    const fields = container.querySelectorAll(".action-banner-metrics .card-field");
+    for (const field of fields) {
+        const fieldLabel = field.querySelector(".field-label")?.textContent?.trim();
+        if (fieldLabel === label) {
+            return field.querySelector(".field-value")?.textContent?.trim() || "";
+        }
+    }
+    return "";
+}
+
+function parseDaysOverdue(dueDate) {
+    if (!dueDate) {
+        return null;
+    }
+    const due = new Date(String(dueDate).slice(0, 10));
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    due.setHours(0, 0, 0, 0);
+    if (Number.isNaN(due.getTime()) || due >= today) {
+        return null;
+    }
+    const diff = Math.floor((today - due) / 86400000);
+    if (diff >= 500) {
+        return "500+";
+    }
+    return String(diff);
+}
+
+function inferPriorityLevel(row, reason) {
+    const status = String(row?.priority_status || "").toLowerCase();
+    const reasonLower = String(reason || "").toLowerCase();
+    if (status.includes("overdue") || reasonLower.includes("overdue")) {
+        return "High";
+    }
+    if (status.includes("high risk") || reasonLower.includes("ltv") || reasonLower.includes("high-risk")) {
+        return "High";
+    }
+    if (reasonLower.includes("forfeiture") || reasonLower.includes("collateral")) {
+        return "High";
+    }
+    if (status.includes("due soon") || reasonLower.includes("due soon")) {
+        return "Medium";
+    }
+    return "Medium";
+}
+
+function outstandingBalance(row) {
+    if (row?.remaining_due != null && row.remaining_due !== "") {
+        return Number(row.remaining_due);
+    }
+    if (row?.missed_amount != null && row.missed_amount !== "") {
+        return Number(row.missed_amount);
+    }
+    if (row?.amount_due != null && row?.amount_paid != null) {
+        return Number(row.amount_due) - Number(row.amount_paid);
+    }
+    if (row?.current_balance != null && row.current_balance !== "") {
+        return Number(row.current_balance);
+    }
+    return null;
+}
+
+function buildKpiRow(label, value, highlight = false) {
+    const valueClass = highlight ? " kpi-value-highlight" : "";
+    return `<div class="kpi-row"><span class="kpi-label">${escapeHtml(label)}:</span><span class="kpi-value${valueClass}">${escapeHtml(value)}</span></div>`;
+}
+
+function buildActionBannerKpis(row, reason, bannerHtml) {
+    const reasonText = reason || extractReasonFromBannerHtml(bannerHtml);
+    const kpis = [];
+    const priority = inferPriorityLevel(row, reasonText);
+    kpis.push(buildKpiRow("Priority Level", priority, priority === "High"));
+
+    const dueRaw = row?.due_date || row?.next_due_date;
+    const daysOverdue = parseDaysOverdue(dueRaw);
+    const status = String(row?.priority_status || "").toLowerCase();
+    const reasonLower = reasonText.toLowerCase();
+    const isHighRisk = status.includes("high risk") || reasonLower.includes("ltv");
+
+    if (daysOverdue && !isHighRisk) {
+        const highlight = daysOverdue === "500+" || Number(daysOverdue) >= 30;
+        kpis.push(buildKpiRow("Days Overdue", daysOverdue, highlight));
+    }
+
+    if (isHighRisk && row?.ltv_percent != null) {
+        kpis.push(buildKpiRow("LTV", formatDisplayLtv(row.ltv_percent)));
+    } else if (dueRaw && !daysOverdue && !isHighRisk) {
+        kpis.push(buildKpiRow("Due Date", formatDisplayDate(dueRaw)));
+    }
+
+    const balance = outstandingBalance(row);
+    if (balance != null && !Number.isNaN(balance) && balance > 0) {
+        kpis.push(buildKpiRow("Outstanding Balance", formatDisplayMoney(balance)));
+    } else {
+        const metricBalance = parseMetricFromBannerHtml(bannerHtml, "Remaining Due");
+        if (metricBalance) {
+            kpis.push(buildKpiRow("Outstanding Balance", metricBalance));
+        }
+    }
+
+    if (reasonText) {
+        kpis.push(buildKpiRow("Reason", reasonText));
+    }
+
+    return kpis.length ? `<div class="action-banner-kpis">${kpis.join("")}</div>` : "";
+}
+
+function enhanceRecommendedActionHtml(recommendedHtml, queryDetails) {
+    if (!recommendedHtml) {
+        return recommendedHtml;
+    }
+
+    const container = document.createElement("div");
+    container.innerHTML = recommendedHtml;
+    const banner = container.querySelector(".action-banner");
+    if (!banner) {
+        return recommendedHtml;
+    }
+
+    const query = getPrimaryQuery(queryDetails);
+    const row = query?.rows?.[0] || null;
+    const reason = extractReasonFromBannerHtml(recommendedHtml);
+
+    banner.querySelector(".action-banner-detail")?.remove();
+    banner.querySelector(".action-banner-metrics")?.remove();
+
+    const kpisHtml = buildActionBannerKpis(row, reason, recommendedHtml);
+    if (kpisHtml) {
+        banner.insertAdjacentHTML("beforeend", kpisHtml);
+    }
+
+    return banner.outerHTML;
+}
+
+function selectFinalAuditSql(fullSql, firstRow, toolName) {
+    if (!fullSql) {
+        return "N/A";
+    }
+
+    const sections = fullSql.split(/\n\n(?=-- )/u).map((section) => section.trim()).filter(Boolean);
+    if (sections.length <= 1) {
+        return fullSql.trim();
+    }
+
+    const sectionKeys = [];
+    if (firstRow?.priority_status) {
+        sectionKeys.push(firstRow.priority_status);
+    }
+    if (firstRow?.record_type) {
+        sectionKeys.push(firstRow.record_type);
+    }
+
+    const normalizedTool = String(toolName || "").toLowerCase();
+    if (normalizedTool.includes("today_priorities") && sectionKeys.length === 0) {
+        sectionKeys.push("Overdue");
+    }
+
+    for (const key of sectionKeys) {
+        const normalizedKey = key.toLowerCase();
+        const match = sections.find((section) => {
+            const header = section.match(/^--\s*(.+?)(?:\n|$)/u);
+            if (!header) {
+                return false;
+            }
+            const headerText = header[1].trim().toLowerCase();
+            return headerText === normalizedKey
+                || headerText.includes(normalizedKey)
+                || normalizedKey.includes(headerText);
+        });
+        if (match) {
+            return match.replace(/^--\s*[^\n]+\n?/u, "").trim() || match.trim();
+        }
+    }
+
+    const firstSection = sections[0];
+    return firstSection.replace(/^--\s*[^\n]+\n?/u, "").trim() || firstSection.trim();
+}
+
+function filterTablesForSql(sql, tablesUsed) {
+    if (!tablesUsed || !sql) {
+        return tablesUsed || {};
+    }
+
+    const filtered = {};
+    Object.entries(tablesUsed).forEach(([table, columns]) => {
+        const pattern = new RegExp(`\\b${table.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
+        if (pattern.test(sql)) {
+            filtered[table] = columns;
+        }
+    });
+    return Object.keys(filtered).length ? filtered : tablesUsed;
+}
+
+function renderTablesUsed(tablesUsed) {
+    if (!tablesUsed || Object.keys(tablesUsed).length === 0) {
+        return '<div class="detail-value">No table metadata available.</div>';
+    }
+
+    return `<ul class="tables-used-list">${Object.entries(tablesUsed).map(([table, columns]) =>
+        `<li><strong>${escapeHtml(titleCaseLabel(table))}:</strong> ${escapeHtml((columns || []).join(", "))}</li>`
+    ).join("")}</ul>`;
+}
+
+function renderQueryDetailsBody(queryDetails) {
+    if (!queryDetails) {
+        return '<div class="results-empty">No query metadata available.</div>';
+    }
+
+    const queries = (queryDetails.queries || []).filter((query) => query.rows && query.rows.length > 0);
+    if (queries.length === 0) {
+        return '<div class="results-empty">No query metadata available.</div>';
+    }
+
+    const query = queries[0];
+    const firstRow = query.rows[0];
+    const finalSql = selectFinalAuditSql(query.sql, firstRow, query.tool);
+    const finalTables = filterTablesForSql(finalSql, query.tables_used);
+
+    return `
+        <div class="detail-field">
+            <div class="detail-label">Tool Used</div>
+            <div class="detail-value mono">${escapeHtml(titleCaseLabel(query.tool || "Unknown"))}</div>
+        </div>
+        <div class="detail-field">
+            <div class="detail-label">Tables Used</div>
+            ${renderTablesUsed(finalTables)}
+        </div>
+        <div class="detail-field">
+            <div class="detail-label">Final SQL Query Used</div>
+            <pre class="query-sql detail-value mono">${escapeHtml(finalSql || "N/A")}</pre>
+        </div>
+        <div class="detail-field">
+            <div class="detail-label">Final Result Set</div>
+            <div class="results-table-wrap">${renderResultsTable(query.rows)}</div>
+        </div>
+    `;
+}
+
+function renderResultsBody(queryDetails) {
+    const queries = ((queryDetails && queryDetails.queries) || [])
+        .filter((query) => query.rows && query.rows.length > 0);
+    if (queries.length === 0) {
+        return "";
+    }
+
+    const query = queries[0];
+    return `<div class="results-table-wrap">${renderResultsTable(query.rows)}</div>`;
+}
+
+function splitReplyContent(reply) {
+    const container = document.createElement("div");
+    container.innerHTML = reply || "";
+
+    const banner = container.querySelector(".action-banner");
+    let recommendedHtml = "";
+    if (banner) {
+        recommendedHtml = banner.outerHTML;
+        banner.remove();
+    }
+
+    const summaryNodes = container.querySelectorAll(".business-summary, .portfolio-status-intro, .portfolio-status-list");
+    let businessHtml = "";
+    if (summaryNodes.length > 0) {
+        businessHtml = Array.from(summaryNodes).map((node) => node.outerHTML).join("");
+        summaryNodes.forEach((node) => node.remove());
+    }
+
+    container.querySelectorAll(".response-section, .response-title, .card-grid, .summary-meta").forEach((node) => {
+        node.remove();
+    });
+
+    const leftover = container.innerHTML.trim();
+    if (leftover) {
+        businessHtml = businessHtml
+            ? `${businessHtml}<div class="assistant-extra">${leftover}</div>`
+            : leftover;
+    }
+
+    return { businessHtml, recommendedHtml };
+}
+
+function createViewCard(title, bodyHtml, hidden = false, variant = "") {
+    const card = document.createElement("div");
+    const variantClass = variant ? ` view-card-${variant}` : "";
+    card.className = `view-card${variantClass}${hidden ? " hidden" : ""}`;
+
+    const cardTitle = document.createElement("div");
+    cardTitle.className = "view-card-title";
+    cardTitle.textContent = title;
+
+    const cardBody = document.createElement("div");
+    cardBody.className = "view-card-body";
+    cardBody.innerHTML = bodyHtml;
+
+    card.appendChild(cardTitle);
+    card.appendChild(cardBody);
+    return card;
 }
 
 function setAnswerContent(question, reply, debugInfo = null, options = {}) {
@@ -591,15 +1860,46 @@ function setAnswerContent(question, reply, debugInfo = null, options = {}) {
         panel.appendChild(header);
     }
 
-    const body = document.createElement("div");
-    body.className = `copilot-body${options.typing ? " typing" : ""}`;
-    const format = options.format || "html";
-    if (format === "html" && !options.typing) {
-        body.innerHTML = reply;
-    } else {
-        body.textContent = reply;
+    const queryDetails = options.queryDetails || null;
+    const polishedReply = polishReplyCopy(reply);
+    const { businessHtml, recommendedHtml } = splitReplyContent(polishedReply);
+
+    if (recommendedHtml) {
+        const enhancedRecommended = enhanceRecommendedActionHtml(recommendedHtml, queryDetails);
+        panel.appendChild(createViewCard("Recommended Action", enhancedRecommended, false, "action"));
     }
-    panel.appendChild(body);
+
+    if (businessHtml) {
+        const summaryCard = createViewCard("Business Summary", "", false, "summary");
+        const body = document.createElement("div");
+        body.className = `copilot-body${options.typing ? " typing" : ""}`;
+        const format = options.format || "html";
+        if (format === "html" && !options.typing) {
+            body.innerHTML = businessHtml;
+        } else {
+            body.textContent = reply;
+        }
+        summaryCard.querySelector(".view-card-body").appendChild(body);
+        panel.appendChild(summaryCard);
+    }
+
+    const resultsHtml = renderResultsBody(queryDetails);
+    if (resultsHtml) {
+        panel.appendChild(createViewCard("Results", resultsHtml, false, "results"));
+    }
+
+    const detailsCard = createViewCard("Technical Audit", renderQueryDetailsBody(queryDetails), true, "details");
+
+    const toggleButton = document.createElement("button");
+    toggleButton.type = "button";
+    toggleButton.className = "query-details-toggle";
+    toggleButton.textContent = "Show technical audit trail";
+    toggleButton.addEventListener("click", () => {
+        const hidden = detailsCard.classList.toggle("hidden");
+        toggleButton.textContent = hidden ? "Show technical audit trail" : "Hide technical audit trail";
+    });
+    panel.appendChild(toggleButton);
+    panel.appendChild(detailsCard);
 
     answerBox.appendChild(panel);
 }
@@ -632,14 +1932,17 @@ async function sendMessage(text) {
             return;
         }
 
-        setAnswerContent(result.question || question, result.reply, result.debug || null, {
+        setAnswerContent(result.question || question, polishReplyCopy(result.reply), result.debug || null, {
             format: result.format || "html",
+            queryDetails: result.query_details || null,
         });
 
         conversationHistory.push({
             role: "assistant",
             content: result.history_text || result.reply,
         });
+
+        loadDashboardStats();
 
     } catch (error) {
         setAnswerContent(question, "Unable to reach the backend. Is Flask running on port 5000?");
@@ -651,7 +1954,7 @@ function sendQuestion() {
     const input = document.getElementById("userQuestion");
     const text = input.value.trim();
     if (!text) {
-        setAnswerContent(null, "Please enter a question or use one of the quick widgets.");
+        setAnswerContent(null, "Please enter a question or pick a quick action.");
         return;
     }
     input.value = "";
@@ -659,14 +1962,82 @@ function sendQuestion() {
 }
 
 function loadTodayPriorities() { sendMessage("Who should I call today? Show me today's priorities."); }
+function loadCustomerCount() { sendMessage("How many customers?"); }
 function loadDueSoon() { sendMessage("Which customers have payments due soon?"); }
 function loadOverdue() { sendMessage("Show me all overdue customers."); }
 function loadMissedPayments() { sendMessage("Which customers missed their payments?"); }
 function loadHighRiskLoans() { sendMessage("Show me high-risk loans with high LTV."); }
 function loadCollateralAtRisk() { sendMessage("What collateral is at risk of forfeiture?"); }
 
+async function fetchDashboardStat(message) {
+    try {
+        const response = await fetch(`${API_BASE}/chat`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message, history: [] }),
+        });
+        const result = await response.json();
+        if (result.error) {
+            return null;
+        }
+
+        const queries = ((result.query_details && result.query_details.queries) || [])
+            .filter((query) => Array.isArray(query.rows));
+        if (queries.length === 0) {
+            return null;
+        }
+
+        const rows = queries[0].rows || [];
+        if (rows.length === 1 && rows[0].count !== undefined && rows[0].count !== null) {
+            return Number(rows[0].count);
+        }
+        return rows.length;
+    } catch (error) {
+        console.error(error);
+        return null;
+    }
+}
+
+function setStatValue(elementId, value) {
+    const element = document.getElementById(elementId);
+    if (!element) {
+        return;
+    }
+    element.classList.remove("loading");
+    element.textContent = value === null || value === undefined ? DISPLAY_PLACEHOLDER : String(value);
+}
+
+async function loadDashboardStats() {
+    const statIds = ["statCustomers", "statOverdue", "statHighRisk", "statCollateral"];
+    statIds.forEach((id) => {
+        const element = document.getElementById(id);
+        if (element) {
+            element.classList.add("loading");
+            element.textContent = "…";
+        }
+    });
+
+    const [customers, overdue, highRisk, collateral] = await Promise.all([
+        fetchDashboardStat("How many customers?"),
+        fetchDashboardStat("Show me all overdue customers."),
+        fetchDashboardStat("Show me high-risk loans with high LTV."),
+        fetchDashboardStat("What collateral is at risk of forfeiture?"),
+    ]);
+
+    setStatValue("statCustomers", customers);
+    setStatValue("statOverdue", overdue);
+    setStatValue("statHighRisk", highRisk);
+    setStatValue("statCollateral", collateral);
+}
+
 document.getElementById("userQuestion").addEventListener("keydown", (e) => {
     if (e.key === "Enter") sendQuestion();
+});
+
+document.addEventListener("DOMContentLoaded", () => {
+    setHeaderDate();
+    startPlaceholderRotation();
+    loadDashboardStats();
 });
 </script>
 

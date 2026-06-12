@@ -11,12 +11,22 @@ CUSTOMER_SUMMARY = "CUSTOMER_SUMMARY"
 CUSTOMER_ACCOUNTS = "CUSTOMER_ACCOUNTS"
 CUSTOMER_LOANS = "CUSTOMER_LOANS"
 DUE_SOON = "DUE_SOON"
+DUE_TODAY = "DUE_TODAY"
+DUE_TOMORROW = "DUE_TOMORROW"
+DUE_THIS_WEEK = "DUE_THIS_WEEK"
 MISSED_PAYMENTS = "MISSED_PAYMENTS"
+CUSTOMER_COUNT = "CUSTOMER_COUNT"
+LOAN_COUNT = "LOAN_COUNT"
+ACCOUNT_COUNT = "ACCOUNT_COUNT"
+TOTAL_OVERDUE = "TOTAL_OVERDUE"
+PORTFOLIO_BALANCE = "PORTFOLIO_BALANCE"
+CUSTOMER_SEARCH = "CUSTOMER_SEARCH"
+PORTFOLIO_SUMMARY = "PORTFOLIO_SUMMARY"
 UNKNOWN = "UNKNOWN"
 
 CLARIFYING_MESSAGE = (
-    "I can help with customer accounts, loans, payments, collateral, or daily priorities. "
-    "Which would you like to see?"
+    "I can help with portfolio analytics, customer search, accounts, loans, payments, "
+    "collateral, or daily priorities. Which would you like to see?"
 )
 
 OPERATIONAL_INTENTS = frozenset({
@@ -28,7 +38,17 @@ OPERATIONAL_INTENTS = frozenset({
     CUSTOMER_ACCOUNTS,
     CUSTOMER_LOANS,
     DUE_SOON,
+    DUE_TODAY,
+    DUE_TOMORROW,
+    DUE_THIS_WEEK,
     MISSED_PAYMENTS,
+    CUSTOMER_COUNT,
+    LOAN_COUNT,
+    ACCOUNT_COUNT,
+    TOTAL_OVERDUE,
+    PORTFOLIO_BALANCE,
+    CUSTOMER_SEARCH,
+    PORTFOLIO_SUMMARY,
 })
 
 AMBIGUOUS_PHRASES = (
@@ -52,11 +72,29 @@ TODAYS_PRIORITIES_PHRASES = (
     "what should i focus on this morning",
     "what requires attention today",
     "what requires attention this morning",
+    "what needs my attention",
+    "what needs my attention today",
     "give me today's priorities",
     "give me todays priorities",
     "give me my morning briefing",
     "what should i do today",
+    "what do you think i should do today",
+    "what should i focus on",
+    "what needs attention",
+    "who should i call first",
     "what should i work on first",
+    "what should i work on first today",
+    "what is most important today",
+    "what's most important today",
+    "what should i prioritize",
+    "what should i prioritize today",
+    "who needs attention first this morning",
+    "who needs attention first today",
+    "what should i be doing right now",
+    "give me an operations summary",
+    "give me today's operations summary",
+    "give me today's portfolio summary",
+    "give me todays portfolio summary",
     "which customers need attention",
     "which accounts need immediate attention",
     "what should i focus on before lunch",
@@ -82,15 +120,36 @@ TODAYS_PRIORITIES_PHRASES = (
     "if i were the branch manager, what would i do first",
 )
 
+TODAYS_PRIORITIES_EXECUTIVE_PHRASES = (
+    "what should i do today",
+    "what do you think i should do today",
+    "what should i focus on today",
+    "what should i focus on",
+    "what needs attention",
+    "what needs my attention",
+    "what should i work on first",
+    "what is most important today",
+    "what should i prioritize",
+    "give me today's priorities",
+    "who should i call today",
+    "who needs attention first this morning",
+    "what should i be doing right now",
+    "give me an operations summary",
+    "give me today's portfolio summary",
+)
+
 TODAYS_PRIORITIES_SYNONYMS = (
     "priority",
     "priorities",
+    "prioritize",
     "urgent",
     "important",
     "focus",
     "attention",
+    "needs my attention",
     "morning briefing",
     "executive summary",
+    "operations summary",
     "manager summary",
     "manager's summary",
     "first call",
@@ -129,11 +188,34 @@ TODAYS_PRIORITIES_CONTEXT = (
 TODAYS_PRIORITIES_PATTERNS = (
     re.compile(r"who should i call(?:\s+first)?(?:\s+today)?", re.IGNORECASE),
     re.compile(
-        r"(?:what|who)\s+should\s+i\s+(?:call|focus(?:\s+on)?|do|work on|take care of)(?:\s+first)?(?:\s+today|\s+this morning)?",
+        r"(?:what|who)\s+should\s+i\s+(?:call|focus(?:\s+on)?|do|work on|take care of|priorit(?:y|ize)|be doing)(?:\s+first)?(?:\s+today|\s+this morning|\s+right now)?",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"what do you think i should do(?:\s+today|\s+this morning|\s+right now)?",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"what needs?(?:\s+my)?\s+attention(?:\s+today|\s+first|\s+this morning)?",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"who needs?(?:\s+my)?\s+attention(?:\s+first)?(?:\s+this morning|\s+today)?",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"what(?:'s| is)\s+(?:the\s+)?most important(?:\s+thing)?(?:\s+today|\s+right now)?",
         re.IGNORECASE,
     ),
     re.compile(r"what requires attention(?:\s+today|\s+this morning)?", re.IGNORECASE),
-    re.compile(r"give me (?:my |a )?(?:today'?s priorities|morning briefing|manager'?s summary)", re.IGNORECASE),
+    re.compile(
+        r"give me (?:my |an? )?(?:priorities|morning briefing|manager'?s summary|operations summary)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"give me today'?s (?:priorities|portfolio summary|operations summary)",
+        re.IGNORECASE,
+    ),
     re.compile(
         r"(?:what|where)\s+should\s+i\s+(?:focus|start|begin|work|spend my time)(?:\s+on)?(?:\s+before|\s+today|\s+first)?",
         re.IGNORECASE,
@@ -144,11 +226,11 @@ TODAYS_PRIORITIES_PATTERNS = (
     ),
     re.compile(
         r"(?:today(?:'s)?|this\s+morning(?:'s)?|morning)\s+"
-        r"(?:priorit(?:y|ies)|briefing|follow[- ]?up|workload|plan|agenda|operations)",
+        r"(?:priorit(?:y|ies)|briefing|follow[- ]?up|workload|plan|agenda|operations|portfolio summary)",
         re.IGNORECASE,
     ),
     re.compile(
-        r"(?:priorit(?:y|ies)|briefing|executive summary|manager'?s summary|follow[- ]?up)"
+        r"(?:priorit(?:y|ies)|briefing|executive summary|manager'?s summary|follow[- ]?up|operations summary)"
         r".*(?:today|this morning|morning|operations|workload|portfolio|right now)",
         re.IGNORECASE,
     ),
@@ -158,6 +240,9 @@ TODAYS_PRIORITIES_PATTERNS = (
     re.compile(r"biggest issue.*portfolio.*today", re.IGNORECASE),
     re.compile(r"highest priority account.*today", re.IGNORECASE),
     re.compile(r"take care of before the end of the day", re.IGNORECASE),
+    re.compile(r"^what needs attention\??$", re.IGNORECASE),
+    re.compile(r"^what should i focus on\??$", re.IGNORECASE),
+    re.compile(r"^who should i call first\??$", re.IGNORECASE),
 )
 
 OVERDUE_SYNONYMS = (
@@ -226,9 +311,94 @@ CUSTOMER_LOANS_SYNONYMS = (
 DUE_SOON_SYNONYMS = (
     "due soon",
     "coming due",
+    "coming due next",
     "near due",
     "upcoming payment",
+    "upcoming payments",
     "payments due",
+)
+
+PAYMENT_DUE_LITERAL_PHRASES = (
+    "due today",
+    "due tomorrow",
+    "due this week",
+    "due soon",
+    "due next month",
+)
+
+PAYMENT_DUE_PHRASES = PAYMENT_DUE_LITERAL_PHRASES + (
+    "who is due today",
+    "who is due tomorrow",
+    "who is due this week",
+    "who is due soon",
+    "any payments due today",
+    "any payments due tomorrow",
+    "any payments due this week",
+    "who has a payment due today",
+    "payments due today",
+    "payments due tomorrow",
+    "payments due this week",
+    "payments due soon",
+)
+
+DUE_TODAY_PHRASES = (
+    "who is due today",
+    "any payments due today",
+    "what payments are due today",
+    "who has a payment due today",
+    "payments due today",
+    "due today",
+)
+
+DUE_TOMORROW_PHRASES = (
+    "who is due tomorrow",
+    "any payments due tomorrow",
+    "payments due tomorrow",
+    "due tomorrow",
+)
+
+DUE_THIS_WEEK_PHRASES = (
+    "who is due this week",
+    "payments due this week",
+    "due this week",
+)
+
+DUE_SOON_PHRASES = (
+    "who is due soon",
+    "payments due soon",
+    "upcoming payments",
+    "what is coming due next",
+    "due soon",
+)
+
+DUE_TODAY_PATTERNS = (
+    re.compile(r"who(?:'s|\s+is)\s+due\s+today", re.IGNORECASE),
+    re.compile(r"(?:any|which)\s+payments?\s+due\s+today", re.IGNORECASE),
+    re.compile(r"what payments? (?:are )?due\s+today", re.IGNORECASE),
+    re.compile(r"who\s+has\s+(?:a\s+)?payments?\s+due\s+today", re.IGNORECASE),
+    re.compile(r"payments?\s+due\s+today", re.IGNORECASE),
+    re.compile(r"^due\s+today\.?$", re.IGNORECASE),
+)
+
+DUE_TOMORROW_PATTERNS = (
+    re.compile(r"who(?:'s|\s+is)\s+due\s+tomorrow", re.IGNORECASE),
+    re.compile(r"(?:any|which)\s+payments?\s+due\s+tomorrow", re.IGNORECASE),
+    re.compile(r"payments?\s+due\s+tomorrow", re.IGNORECASE),
+    re.compile(r"^due\s+tomorrow\.?$", re.IGNORECASE),
+)
+
+DUE_THIS_WEEK_PATTERNS = (
+    re.compile(r"who(?:'s|\s+is)\s+due\s+this\s+week", re.IGNORECASE),
+    re.compile(r"payments?\s+due\s+this\s+week", re.IGNORECASE),
+    re.compile(r"^due\s+this\s+week\.?$", re.IGNORECASE),
+)
+
+DUE_SOON_PATTERNS = (
+    re.compile(r"who(?:'s|\s+is)\s+due\s+soon", re.IGNORECASE),
+    re.compile(r"payments?\s+due\s+soon", re.IGNORECASE),
+    re.compile(r"^due\s+soon\.?$", re.IGNORECASE),
+    re.compile(r"upcoming payments?", re.IGNORECASE),
+    re.compile(r"what(?:'s| is) coming due next\??", re.IGNORECASE),
 )
 
 MISSED_PAYMENT_SYNONYMS = (
@@ -238,16 +408,133 @@ MISSED_PAYMENT_SYNONYMS = (
     "failed payment",
 )
 
+CUSTOMER_COUNT_SYNONYMS = (
+    "customer count",
+    "how many customers",
+    "number of customers",
+    "total customers",
+    "customers on file",
+    "count customers",
+)
+
+LOAN_COUNT_SYNONYMS = (
+    "loan count",
+    "how many loans",
+    "number of loans",
+    "total loans",
+    "active loans",
+    "count loans",
+)
+
+ACCOUNT_COUNT_SYNONYMS = (
+    "account count",
+    "how many accounts",
+    "number of accounts",
+    "total accounts",
+    "accounts on file",
+    "count accounts",
+)
+
+TOTAL_OVERDUE_SYNONYMS = (
+    "total overdue",
+    "overdue amount",
+    "how much overdue",
+    "how much is overdue",
+    "past due amount",
+    "overdue exposure",
+    "amount overdue",
+)
+
+PORTFOLIO_BALANCE_SYNONYMS = (
+    "portfolio balance",
+    "total portfolio balance",
+    "total balance",
+    "total loan balance",
+    "outstanding balance",
+    "loan balances total",
+    "combined balance",
+)
+
+PORTFOLIO_SUMMARY_SYNONYMS = (
+    "portfolio summary",
+    "business overview",
+    "portfolio snapshot",
+    "portfolio overview",
+    "overall portfolio",
+    "how is the portfolio",
+    "how is business",
+    "business snapshot",
+    "branch overview",
+    "portfolio health",
+    "portfolio metrics",
+)
+
+CUSTOMER_SEARCH_SYNONYMS = (
+    "find customer",
+    "search customer",
+    "search for customer",
+    "look up customer",
+    "customer search",
+    "find a customer",
+    "search customers",
+    "look up",
+)
+
+SEARCH_NAME_PATTERNS = (
+    re.compile(r"find customer\s+(.+)", re.IGNORECASE),
+    re.compile(r"search for customer\s+(.+)", re.IGNORECASE),
+    re.compile(r"search customer\s+(.+)", re.IGNORECASE),
+    re.compile(r"look up customer\s+(.+)", re.IGNORECASE),
+    re.compile(r"search for\s+(.+)", re.IGNORECASE),
+    re.compile(r"find\s+(.+)", re.IGNORECASE),
+    re.compile(r"who is\s+(.+)", re.IGNORECASE),
+)
+
+SEARCH_NAME_BLOCKS = (
+    "overdue",
+    "past due",
+    "delinquent",
+    "late",
+    "high risk",
+    "collateral",
+    "due today",
+    "due tomorrow",
+    "due this week",
+    "due soon",
+    "due next month",
+    "the portfolio",
+    "my portfolio",
+    "the business",
+)
+
+SEARCH_GENERIC_NAMES = {
+    "customer",
+    "customers",
+    "a customer",
+    "client",
+    "clients",
+}
+
 INTENT_PRIORITY = (
     CUSTOMER_LOANS,
     CUSTOMER_ACCOUNTS,
     CUSTOMER_SUMMARY,
+    CUSTOMER_SEARCH,
+    CUSTOMER_COUNT,
+    LOAN_COUNT,
+    ACCOUNT_COUNT,
+    TOTAL_OVERDUE,
+    PORTFOLIO_BALANCE,
+    TODAYS_PRIORITIES,
+    PORTFOLIO_SUMMARY,
     MISSED_PAYMENTS,
     OVERDUE_CUSTOMERS,
     HIGH_RISK_LOANS,
     COLLATERAL_RISK,
+    DUE_TODAY,
+    DUE_TOMORROW,
+    DUE_THIS_WEEK,
     DUE_SOON,
-    TODAYS_PRIORITIES,
 )
 
 INTENT_TO_ACTION = {
@@ -258,8 +545,18 @@ INTENT_TO_ACTION = {
     CUSTOMER_SUMMARY: "customer_summary",
     CUSTOMER_ACCOUNTS: "customer_accounts",
     CUSTOMER_LOANS: "customer_loans",
+    DUE_TODAY: "due_today_customers",
+    DUE_TOMORROW: "due_tomorrow_customers",
+    DUE_THIS_WEEK: "due_this_week_customers",
     DUE_SOON: "due_soon_customers",
     MISSED_PAYMENTS: "missed_payments",
+    CUSTOMER_COUNT: "customer_count",
+    LOAN_COUNT: "loan_count",
+    ACCOUNT_COUNT: "account_count",
+    TOTAL_OVERDUE: "total_overdue",
+    PORTFOLIO_BALANCE: "portfolio_balance",
+    CUSTOMER_SEARCH: "customer_search",
+    PORTFOLIO_SUMMARY: "portfolio_summary",
 }
 
 INTENT_TO_TOOL = {
@@ -273,8 +570,18 @@ INTENT_TO_TOOL = {
     ),
     CUSTOMER_ACCOUNTS: "get_customer_accounts",
     CUSTOMER_LOANS: "get_customer_loans",
+    DUE_TODAY: "get_due_today_customers",
+    DUE_TOMORROW: "get_due_tomorrow_customers",
+    DUE_THIS_WEEK: "get_due_this_week_customers",
     DUE_SOON: "get_due_soon_customers",
     MISSED_PAYMENTS: "get_missed_payments",
+    CUSTOMER_COUNT: "get_customer_count",
+    LOAN_COUNT: "get_loan_count",
+    ACCOUNT_COUNT: "get_account_count",
+    TOTAL_OVERDUE: "get_total_overdue_amount",
+    PORTFOLIO_BALANCE: "get_total_portfolio_balance",
+    CUSTOMER_SEARCH: "search_customers",
+    PORTFOLIO_SUMMARY: "get_portfolio_summary",
     UNKNOWN: "(none)",
 }
 
@@ -298,7 +605,63 @@ RESERVED_CUSTOMER_NAMES = {
     "today",
     "today's priorities",
     "today priorities",
+    "due today",
+    "due tomorrow",
+    "due this week",
+    "due soon",
+    "due next month",
 }
+
+
+def is_payment_due_phrase(text: str) -> bool:
+    normalized = _normalize(text)
+    if not normalized:
+        return False
+    if normalized in PAYMENT_DUE_LITERAL_PHRASES:
+        return True
+    return _contains_any(normalized, PAYMENT_DUE_PHRASES)
+
+
+def is_payment_due_query(text: str) -> bool:
+    normalized = _normalize(text)
+    if is_payment_due_phrase(normalized):
+        return True
+    return (
+        _score_phrases(normalized, DUE_TODAY_PHRASES, score=1.0) > 0
+        or _score_phrases(normalized, DUE_TOMORROW_PHRASES, score=1.0) > 0
+        or _score_phrases(normalized, DUE_THIS_WEEK_PHRASES, score=1.0) > 0
+        or _score_phrases(normalized, DUE_SOON_PHRASES, score=1.0) > 0
+        or _matches_any(normalized, DUE_TODAY_PATTERNS)
+        or _matches_any(normalized, DUE_TOMORROW_PATTERNS)
+        or _matches_any(normalized, DUE_THIS_WEEK_PATTERNS)
+        or _matches_any(normalized, DUE_SOON_PATTERNS)
+    )
+
+
+def payment_due_tool_for_phrase(text: str) -> str | None:
+    normalized = _normalize(text)
+    if (
+        _score_phrases(normalized, DUE_TODAY_PHRASES, score=1.0) > 0
+        or _matches_any(normalized, DUE_TODAY_PATTERNS)
+    ):
+        return "get_due_today_customers"
+    if (
+        _score_phrases(normalized, DUE_TOMORROW_PHRASES, score=1.0) > 0
+        or _matches_any(normalized, DUE_TOMORROW_PATTERNS)
+    ):
+        return "get_due_tomorrow_customers"
+    if (
+        _score_phrases(normalized, DUE_THIS_WEEK_PHRASES, score=1.0) > 0
+        or _matches_any(normalized, DUE_THIS_WEEK_PATTERNS)
+    ):
+        return "get_due_this_week_customers"
+    if (
+        _score_phrases(normalized, DUE_SOON_PHRASES, score=1.0) > 0
+        or _matches_any(normalized, DUE_SOON_PATTERNS)
+        or normalized == "due soon"
+    ):
+        return "get_due_soon_customers"
+    return None
 
 BLOCKS_TODAYS_PRIORITIES = (
     "overdue",
@@ -370,6 +733,8 @@ def _clean_name(name: str) -> str:
 
 
 def extract_customer_name(text: str) -> str | None:
+    if is_payment_due_query(text):
+        return None
     for pattern in CUSTOMER_NAME_PATTERNS:
         match = pattern.search(text)
         if not match:
@@ -378,8 +743,29 @@ def extract_customer_name(text: str) -> str | None:
         if not group:
             continue
         name = _clean_name(group)
-        if name and not name.isdigit():
+        if name and not name.isdigit() and not is_payment_due_phrase(name):
             return name
+    return None
+
+
+def extract_search_name(text: str) -> str | None:
+    if is_payment_due_query(text):
+        return None
+    for pattern in SEARCH_NAME_PATTERNS:
+        match = pattern.search(text)
+        if not match:
+            continue
+        name = _clean_name(match.group(1))
+        if not name or name.isdigit():
+            continue
+        lowered = name.lower()
+        if lowered in RESERVED_CUSTOMER_NAMES or lowered in SEARCH_GENERIC_NAMES:
+            continue
+        if any(block in lowered for block in SEARCH_NAME_BLOCKS):
+            continue
+        if is_payment_due_phrase(name):
+            continue
+        return name
     return None
 
 
@@ -423,10 +809,25 @@ def _score_synonyms(
     return 0.0
 
 
+def _is_today_executive_summary_query(text: str) -> bool:
+    if _contains_any(text, (
+        "give me an operations summary",
+        "give me today's operations summary",
+        "give me today's portfolio summary",
+        "give me todays portfolio summary",
+        "today's portfolio summary",
+        "todays portfolio summary",
+        "operations summary",
+    )):
+        return True
+    return "today" in text and "portfolio summary" in text
+
+
 def _score_todays_priorities(text: str) -> float:
     if _blocked_from_todays_priorities(text):
         return 0.0
     return max(
+        _score_phrases(text, TODAYS_PRIORITIES_EXECUTIVE_PHRASES, score=0.98),
         _score_phrases(text, TODAYS_PRIORITIES_PHRASES, score=0.97),
         _score_patterns(text, TODAYS_PRIORITIES_PATTERNS, score=0.95),
         _score_synonyms(
@@ -435,6 +836,28 @@ def _score_todays_priorities(text: str) -> float:
             context_words=TODAYS_PRIORITIES_CONTEXT,
             require_context=True,
         ),
+    )
+
+
+def _score_portfolio_summary_intent(text: str) -> float:
+    if _is_today_executive_summary_query(text):
+        return 0.0
+    return max(
+        _score_phrases(text, (
+            "portfolio summary",
+            "business overview",
+            "portfolio snapshot",
+            "portfolio overview",
+            "how is the portfolio",
+            "how is business",
+            "branch overview",
+            "portfolio health",
+        )),
+        _score_patterns(text, (
+            re.compile(r"(?:portfolio|business).*(?:summary|overview|snapshot|health|metrics)", re.IGNORECASE),
+            re.compile(r"how is (?:the )?(?:portfolio|business)", re.IGNORECASE),
+        )),
+        _score_synonyms(text, PORTFOLIO_SUMMARY_SYNONYMS),
     )
 
 
@@ -461,8 +884,12 @@ def _pick_best(scores: dict[str, float]) -> tuple[str, float]:
 
 
 def _build_result(intent: str, confidence: float, text: str) -> IntentClassification:
-    customer_id = extract_customer_id(text)
-    customer_name = extract_customer_name(text)
+    if is_payment_due_query(text):
+        customer_id = None
+        customer_name = None
+    else:
+        customer_id = extract_customer_id(text)
+        customer_name = extract_customer_name(text)
 
     if customer_id and not customer_name:
         pass
@@ -485,6 +912,17 @@ def _build_result(intent: str, confidence: float, text: str) -> IntentClassifica
                 "get_customer_accounts, get_customer_loans, "
                 "get_customer_payments, get_customer_collateral"
             )
+
+    if intent == CUSTOMER_SEARCH:
+        search_name = extract_search_name(text) or customer_name
+        if search_name and is_payment_due_phrase(search_name):
+            search_name = None
+            customer_name = None
+        if search_name:
+            args["name"] = search_name
+            customer_name = search_name
+        else:
+            tool = "list_customers"
 
     if intent == UNKNOWN:
         action = None
@@ -636,15 +1074,121 @@ def classify_intent(message: str) -> IntentClassification:
         _score_synonyms(text, COLLATERAL_SYNONYMS),
     )
 
+    scores[DUE_TODAY] = max(
+        _score_phrases(text, DUE_TODAY_PHRASES, score=0.98),
+        _score_patterns(text, DUE_TODAY_PATTERNS, score=0.96),
+    )
+
+    scores[DUE_TOMORROW] = max(
+        _score_phrases(text, DUE_TOMORROW_PHRASES, score=0.98),
+        _score_patterns(text, DUE_TOMORROW_PATTERNS, score=0.96),
+    )
+
+    scores[DUE_THIS_WEEK] = max(
+        _score_phrases(text, DUE_THIS_WEEK_PHRASES, score=0.98),
+        _score_patterns(text, DUE_THIS_WEEK_PATTERNS, score=0.96),
+    )
+
     scores[DUE_SOON] = max(
+        _score_phrases(text, DUE_SOON_PHRASES, score=0.98),
         _score_phrases(text, (
-            "due soon",
             "coming due",
-            "payments due soon",
             "near due",
-        )),
-        _score_patterns(text, (re.compile(r"due\s+soon", re.IGNORECASE),)),
+        ), score=0.90),
+        _score_patterns(text, DUE_SOON_PATTERNS, score=0.96),
         _score_synonyms(text, DUE_SOON_SYNONYMS),
+    )
+
+    if is_payment_due_query(text):
+        scores[CUSTOMER_SEARCH] = 0.0
+
+    scores[CUSTOMER_COUNT] = max(
+        _score_phrases(text, (
+            "how many customers",
+            "customer count",
+            "number of customers",
+            "total customers",
+            "customers on file",
+        )),
+        _score_synonyms(text, CUSTOMER_COUNT_SYNONYMS),
+    )
+
+    scores[LOAN_COUNT] = max(
+        _score_phrases(text, (
+            "how many loans",
+            "loan count",
+            "number of loans",
+            "total loans",
+            "active loans",
+        )),
+        _score_synonyms(text, LOAN_COUNT_SYNONYMS),
+    )
+
+    scores[ACCOUNT_COUNT] = max(
+        _score_phrases(text, (
+            "how many accounts",
+            "account count",
+            "number of accounts",
+            "total accounts",
+            "accounts on file",
+        )),
+        _score_synonyms(text, ACCOUNT_COUNT_SYNONYMS),
+    )
+
+    scores[TOTAL_OVERDUE] = max(
+        _score_phrases(text, (
+            "total overdue amount",
+            "total overdue",
+            "how much is overdue",
+            "how much overdue",
+            "overdue amount",
+            "past due amount",
+        )),
+        _score_patterns(text, (
+            re.compile(r"how much.*overdue", re.IGNORECASE),
+            re.compile(r"total.*overdue", re.IGNORECASE),
+        )),
+        _score_synonyms(text, TOTAL_OVERDUE_SYNONYMS),
+    )
+    if "overdue" in text and any(word in text for word in ("total", "amount", "how much", "exposure")):
+        scores[TOTAL_OVERDUE] = max(scores[TOTAL_OVERDUE], 0.94)
+
+    scores[PORTFOLIO_BALANCE] = max(
+        _score_phrases(text, (
+            "total portfolio balance",
+            "portfolio balance",
+            "total loan balance",
+            "combined balance",
+            "outstanding balance",
+        )),
+        _score_patterns(text, (
+            re.compile(r"total.*balance", re.IGNORECASE),
+            re.compile(r"portfolio.*balance", re.IGNORECASE),
+        )),
+        _score_synonyms(text, PORTFOLIO_BALANCE_SYNONYMS),
+    )
+    if "balance" in text and "account" not in text and "customer" not in text:
+        scores[PORTFOLIO_BALANCE] = max(scores[PORTFOLIO_BALANCE], 0.82)
+
+    scores[PORTFOLIO_SUMMARY] = _score_portfolio_summary_intent(text)
+
+    search_name = extract_search_name(text)
+    scores[CUSTOMER_SEARCH] = max(
+        _score_phrases(text, (
+            "find customer",
+            "search customer",
+            "look up customer",
+            "customer search",
+            "search customers",
+            "find a customer",
+        )),
+        _score_patterns(text, (
+            re.compile(r"find customer\b", re.IGNORECASE),
+            re.compile(r"search(?: for)? customer", re.IGNORECASE),
+            re.compile(r"look up customer", re.IGNORECASE),
+        )),
+        _score_synonyms(text, CUSTOMER_SEARCH_SYNONYMS),
+        0.95 if search_name else 0.0,
     )
 
     scores[TODAYS_PRIORITIES] = _score_todays_priorities(text)
@@ -683,6 +1227,8 @@ def is_reserved_customer_name(name: str) -> bool:
     if not normalized:
         return False
     if normalized in RESERVED_CUSTOMER_NAMES:
+        return True
+    if is_payment_due_phrase(normalized):
         return True
     return is_today_priorities_intent(normalized)
 

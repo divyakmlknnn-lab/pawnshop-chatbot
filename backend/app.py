@@ -18,7 +18,16 @@ from database import verify_schema
 from llm_chat import chat
 
 app = Flask(__name__)
+app.config["JSON_AS_ASCII"] = False
 CORS(app)
+
+
+@app.after_request
+def set_utf8_charset(response):
+    content_type = response.content_type or ""
+    if content_type.startswith("application/json") and "charset=" not in content_type:
+        response.headers["Content-Type"] = "application/json; charset=utf-8"
+    return response
 
 
 @app.route("/")
@@ -58,9 +67,9 @@ def run_startup_checks():
             f"WARNING: DB_NAME is '{db_name}'. Expected 'telleriq_db'.",
             file=sys.stderr,
         )
-    if not os.environ.get("OPENAI_API_KEY"):
+    if not os.environ.get("GEMINI_API_KEY"):
         print(
-            "WARNING: OPENAI_API_KEY is not set. Operational queries still work; "
+            "WARNING: GEMINI_API_KEY is not set. Operational queries still work; "
             "general chat fallback will fail until a key is configured.",
             file=sys.stderr,
         )
