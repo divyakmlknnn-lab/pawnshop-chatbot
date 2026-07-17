@@ -4,3 +4,4 @@ pymysql
 google-genai
 python-dotenv
 gunicorn
+mcp>=1.28,<2
