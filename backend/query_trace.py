@@ -41,8 +41,10 @@ def extract_rows(obj):
     if isinstance(obj, list):
         return obj
     if isinstance(obj, dict):
-        if obj.get("error"):
+        if obj.get("error") or obj.get("success") is False:
             return []
+        if isinstance(obj.get("rows"), list):
+            return obj["rows"]
         if "matches" in obj and isinstance(obj["matches"], list):
             return obj["matches"]
         if not is_traced(obj) and not obj.get("_traces"):
@@ -221,8 +223,15 @@ def _collect_sql_and_tables(obj, label: str = "") -> tuple[list[str], dict[str, 
 def extract_final_rows(tool_name: str, result) -> list[dict]:
     if result is None:
         return []
-    if isinstance(result, dict) and result.get("error"):
+    if isinstance(result, dict) and (result.get("error") or result.get("success") is False):
         return []
+
+    if tool_name in {"execute_safe_sql", "validate_safe_sql"} and isinstance(result, dict):
+        trace = result.get("trace")
+        if isinstance(trace, dict) and trace.get("rows"):
+            return trace.get("rows") or []
+        if isinstance(result.get("rows"), list):
+            return result["rows"]
 
     if tool_name == "customer_summary" or is_customer_summary_result(result):
         return _flatten_customer_summary(result)
@@ -241,8 +250,19 @@ def extract_final_rows(tool_name: str, result) -> list[dict]:
 
 
 def extract_final_sql_and_tables(tool_name: str, result) -> tuple[str, dict[str, list[str]]]:
-    if result is None or (isinstance(result, dict) and result.get("error")):
+    if result is None or (isinstance(result, dict) and (result.get("error") or result.get("success") is False)):
         return "", {}
+
+    if tool_name in {"execute_safe_sql", "validate_safe_sql"} and isinstance(result, dict):
+        trace = result.get("trace") if isinstance(result.get("trace"), dict) else {}
+        sql = (trace.get("sql") or result.get("sql") or "").strip()
+        tables_used = trace.get("tables_used") or {}
+        if isinstance(tables_used, dict):
+            return sql, tables_used
+        validation = result.get("validation") if isinstance(result.get("validation"), dict) else {}
+        tables = validation.get("tables_used") or []
+        if isinstance(tables, list):
+            return sql, {table: [] for table in tables}
 
     sql_parts, tables = _collect_sql_and_tables(result)
     if not sql_parts and is_traced(result):
@@ -257,7 +277,7 @@ def build_final_query_entry(
     tool_args: dict | None,
     result,
 ) -> dict | None:
-    if isinstance(result, dict) and result.get("error"):
+    if isinstance(result, dict) and (result.get("error") or result.get("success") is False):
         return None
 
     rows = extract_final_rows(tool_name, result)
@@ -271,6 +291,7 @@ def build_final_query_entry(
         "tables_used": tables_used,
         "sql": sql,
         "rows": rows,
+        "row_count": len(rows),
     }
 
 

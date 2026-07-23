@@ -6,3 +6,4 @@ python-dotenv
 gunicorn
 markdown
 bleach
+mcp>=1.28,<2

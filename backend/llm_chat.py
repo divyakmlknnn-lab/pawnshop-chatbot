@@ -27,6 +27,12 @@ from gemini_fallback import (
 from gemini_text_html import gemini_text_to_html
 from query_details import build_query_details
 from query_trace import extract_rows
+try:
+    from pawnshop_mcp.client import call_mcp_tool
+except ImportError:  # pragma: no cover - optional until MCP package is deployed
+    def call_mcp_tool(tool_name: str, arguments: dict | None = None) -> dict:
+        return {"success": False, "error": "MCP is not available."}
+
 from tools import (
     ALLOWED_TOOL_NAMES,
     BANNED_TOOL_NAMES,
@@ -50,12 +56,26 @@ _gemini_client = None
 
 logger = logging.getLogger("telleriq.chat")
 
+CUSTOMER_REQUIRED_ACTIONS = frozenset({
+    "customer_summary",
+    "customer_accounts",
+    "customer_loans",
+})
+
+MCP_TOOL_NAMES = frozenset({
+    "validate_safe_sql",
+    "execute_safe_sql",
+})
+
 SYSTEM_PROMPT = """You are TellerIQ, a professional pawnshop and banking operations assistant.
 
 Rules:
 - Answer only using data returned by your tools. Never invent balances, dates, names, or loan details.
-- For customer-specific questions, call the appropriate lookup tool before answering.
-- If multiple customers match a name, ask the user to clarify.
+- Prefer predefined lookup tools for standard portfolio and customer questions.
+- When a customer is referenced by partial name or pronoun, resolve them with search_customers or a customer-specific tool using customer_name before answering.
+- Use validate_safe_sql and execute_safe_sql only when no predefined tool directly answers the question.
+- execute_safe_sql accepts read-only SELECT statements against the approved schema only.
+- If multiple customers match a name, ask the user to clarify with the specific names returned.
 - Be concise and professional. Use short paragraphs or bullet lists when helpful.
 - Format dollar amounts as $X,XXX.XX and dates in readable form (e.g., June 5, 2026).
 - Do not mention tools, functions, APIs, or system internals in user-facing replies.
@@ -89,10 +109,51 @@ def _gemini_function_declarations() -> list[dict]:
     return declarations
 
 
+def _mcp_function_declarations() -> list[dict]:
+    return [
+        {
+            "name": "validate_safe_sql",
+            "description": (
+                "Validate a single read-only SELECT statement against "
+                "the approved pawnshop database schema."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sql": {
+                        "type": "string",
+                        "description": "The read-only SELECT statement to validate.",
+                    }
+                },
+                "required": ["sql"],
+            },
+        },
+        {
+            "name": "execute_safe_sql",
+            "description": (
+                "Validate and execute a single read-only SELECT statement "
+                "against the approved pawnshop database schema. Use this only "
+                "when no existing predefined tool directly answers the question."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sql": {
+                        "type": "string",
+                        "description": "The read-only SELECT statement to execute.",
+                    }
+                },
+                "required": ["sql"],
+            },
+        },
+    ]
+
+
 def _gemini_generate_config() -> types.GenerateContentConfig:
+    declarations = _gemini_function_declarations() + _mcp_function_declarations()
     return types.GenerateContentConfig(
         system_instruction=SYSTEM_PROMPT,
-        tools=[types.Tool(function_declarations=_gemini_function_declarations())],
+        tools=[types.Tool(function_declarations=declarations)],
         tool_config=types.ToolConfig(
             function_calling_config=types.FunctionCallingConfig(mode="AUTO"),
         ),
@@ -127,12 +188,42 @@ def _tool_result_count(result) -> int:
     if isinstance(result, list):
         return len(result)
     if isinstance(result, dict):
-        if result.get("error"):
+        if result.get("error") or result.get("success") is False:
             return 0
         matches = result.get("matches")
         if isinstance(matches, list):
             return len(matches)
     return 0
+
+
+def _has_customer_identity(classification: IntentClassification) -> bool:
+    if classification.customer_id or classification.customer_name:
+        return True
+    args = classification.args or {}
+    return bool(args.get("customer_id") or args.get("customer_name"))
+
+
+def _can_execute_operationally(classification: IntentClassification) -> bool:
+    """Return True only when the classifier result can run without LLM orchestration."""
+    if not classification.is_confident or not classification.action:
+        return False
+    if classification.action in CUSTOMER_REQUIRED_ACTIONS:
+        return _has_customer_identity(classification)
+    return True
+
+
+def _call_mcp_tool_safe(tool_name: str, tool_args: dict) -> dict:
+    try:
+        return call_mcp_tool(tool_name, tool_args)
+    except Exception:
+        logger.exception("MCP tool execution failed for %s", tool_name)
+        return {"success": False, "error": "MCP tool execution failed."}
+
+
+def _execute_tool_call(tool_name: str, tool_args: dict):
+    if tool_name in MCP_TOOL_NAMES:
+        return _call_mcp_tool_safe(tool_name, tool_args)
+    return execute_tool(tool_name, tool_args)
 
 
 def _response(
@@ -348,13 +439,6 @@ def _handle_operational_action(
     )
 
 
-def _clarifying_response(classification: IntentClassification) -> dict:
-    return _message_html(
-        CLARIFYING_MESSAGE,
-        "Asked a clarifying question because intent confidence was below threshold.",
-        classification,
-    )
-
 
 def _parse_tool_arguments(raw_arguments) -> dict:
     if isinstance(raw_arguments, dict):
@@ -370,7 +454,8 @@ def _validate_tool_call(tool_name: str) -> str | None:
     normalized = (tool_name or "").strip().lower()
     if normalized in BANNED_TOOL_NAMES:
         return f"Invalid tool name: {tool_name}"
-    if normalized not in ALLOWED_TOOL_NAMES:
+    allowed_names = set(ALLOWED_TOOL_NAMES) | MCP_TOOL_NAMES
+    if normalized not in allowed_names:
         return f"Unknown tool: {tool_name}"
     return None
 
@@ -496,12 +581,48 @@ def _text_to_html_response(
     )
 
 
+def _finalize_gemini_turn(
+    response,
+    classification: IntentClassification,
+    tools_used: list,
+    executions: list[tuple[str, dict, object]],
+) -> dict:
+    reply_text = (response.text or "").strip()
+    if reply_text:
+        return _text_to_html_response(
+            reply_text,
+            "Answered with Gemini using conversation context.",
+            classification,
+            tools_used,
+            executions,
+        )
+
+    formatted = _response_from_executions(classification, executions)
+    if formatted is not None:
+        return formatted
+
+    if executions:
+        return _message_html(
+            "I found related records but could not compose a final answer. Please try rephrasing your question.",
+            "Gemini completed tool calls without a final answer.",
+            classification,
+            executions,
+        )
+
+    return _message_html(
+        CLARIFYING_MESSAGE,
+        "Gemini returned no answer and no tool results were available.",
+        classification,
+        executions,
+    )
+
+
 def _response_from_executions(
     classification: IntentClassification,
     executions: list[tuple[str, dict, object]],
 ) -> dict | None:
     for tool_name, tool_args, tool_result in reversed(executions):
-        if isinstance(tool_result, dict) and tool_result.get("error"):
+        if isinstance(tool_result, dict) and (tool_result.get("error") or tool_result.get("success") is False):
             continue
         formatted = _format_tool_result(tool_name, tool_args, tool_result, classification)
         if formatted is not None:
@@ -530,7 +651,7 @@ def _gemini_fallback_response(
         message,
         classification,
         executions,
-        execute_operational=_execute_classification,
+        execute_operational=_execute_operational_if_ready,
         response_from_executions=_response_from_executions,
         empty_fallback=_empty_gemini_fallback,
     )
@@ -569,12 +690,8 @@ def _chat_with_gemini(message: str, history: list | None, classification: Intent
 
         function_calls = response.function_calls
         if not function_calls:
-            reply_text = (response.text or "").strip()
-            if not reply_text:
-                reply_text = CLARIFYING_MESSAGE
-            return _text_to_html_response(
-                reply_text,
-                "Answered with Gemini using conversation context.",
+            return _finalize_gemini_turn(
+                response,
                 classification,
                 tools_used,
                 executions,
@@ -591,14 +708,10 @@ def _chat_with_gemini(message: str, history: list | None, classification: Intent
                 tool_result = {"error": validation_error}
             else:
                 tool_args = _parse_tool_arguments(call.args)
-                tool_result = execute_tool(tool_name, tool_args)
+                tool_result = _execute_tool_call(tool_name, tool_args)
                 tools_used.append({"tool": tool_name, "args": tool_args})
                 executions.append((tool_name, tool_args, tool_result))
                 _log_tool_execution(tool_name, tool_args, tool_result)
-
-                formatted = _format_tool_result(tool_name, tool_args, tool_result, classification)
-                if formatted is not None:
-                    return formatted
 
             response_parts.append(
                 types.Part.from_function_response(
@@ -608,6 +721,10 @@ def _chat_with_gemini(message: str, history: list | None, classification: Intent
             )
 
         contents.append(types.Content(role="user", parts=response_parts))
+
+    formatted = _response_from_executions(classification, executions)
+    if formatted is not None:
+        return formatted
 
     return _message_html(
         "I couldn't finish that request. Please try rephrasing your question.",
@@ -637,18 +754,6 @@ def _finalize(message: str, result: dict, classification: IntentClassification) 
 
 
 def _execute_classification(message: str, classification: IntentClassification) -> dict:
-    needs_customer = classification.action in {
-        "customer_summary",
-        "customer_accounts",
-        "customer_loans",
-    }
-    has_customer = bool(classification.customer_id or classification.customer_name)
-
-    if needs_customer and not has_customer:
-        if classification.action == "customer_summary":
-            return _handle_operational_action(classification, "customer_summary_missing_id")
-        return _clarifying_response(classification)
-
     return _handle_operational_action(
         classification,
         classification.action,
@@ -657,11 +762,18 @@ def _execute_classification(message: str, classification: IntentClassification) 
     )
 
 
+def _execute_operational_if_ready(message: str, classification: IntentClassification) -> dict:
+    if not _can_execute_operationally(classification):
+        raise RuntimeError("Operational fast path is not ready for this classification.")
+    return _execute_classification(message, classification)
+
+
 def chat(message: str, history: list | None = None) -> dict:
     classification = classify_intent(message)
     _log_routing(message, classification)
 
-    if classification.is_confident and classification.action:
+    if _can_execute_operationally(classification):
+        logger.info("[CHAT] Route: operational fast path")
         try:
             result = _execute_classification(message, classification)
         except Exception as exc:
@@ -672,6 +784,7 @@ def chat(message: str, history: list | None = None) -> dict:
             )
         return _finalize(message, result, classification)
 
+    logger.info("[CHAT] Route: Gemini orchestration")
     try:
         result = _chat_with_gemini(message, history, classification)
     except ValueError:
