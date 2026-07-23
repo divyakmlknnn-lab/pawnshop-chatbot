@@ -3,15 +3,66 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TellerIQ | Banking Operations Copilot</title>
+    <title>TellerIQ | Pawnshop Operations Assistant</title>
     <style>
+        :root {
+            --color-charcoal: #2c2824;
+            --color-charcoal-deep: #1e1b18;
+            --color-gold: #b8922a;
+            --color-gold-light: #d4af37;
+            --color-gold-muted: #c9a227;
+            --color-cream: #f5f0e6;
+            --color-cream-light: #faf7f2;
+            --color-cream-card: #fffdf8;
+            --color-brown: #6b5d4f;
+            --color-brown-muted: #8a7968;
+            --color-border: #e3d9c8;
+            --color-border-strong: #d4c9b8;
+            --color-text: #2c2824;
+            --color-text-muted: #6b5d4f;
+            --color-risk: #c2410c;
+            --color-overdue: #b91c1c;
+            --color-paid: #047857;
+            --shadow-soft: 0 8px 28px rgba(44, 40, 36, 0.08);
+            --shadow-card: 0 4px 16px rgba(44, 40, 36, 0.06);
+            --radius-sm: 10px;
+            --radius-md: 12px;
+            --radius-lg: 16px;
+            --transition-fast: 0.15s ease;
+            --transition-medium: 0.2s ease;
+        }
+
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+        }
+
+        @keyframes pulse-soft {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.45; }
+        }
+
+        @keyframes status-pulse {
+            0%, 100% { box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.18); }
+            50% { box-shadow: 0 0 0 5px rgba(74, 222, 128, 0.08); }
+        }
+
+        @keyframes shimmer {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+
         body {
             font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Arial, sans-serif;
-            background: #f1f5f9;
+            background: linear-gradient(180deg, var(--color-cream) 0%, #ebe3d4 100%);
             margin: 0;
             padding: 28px 20px 40px;
-            color: #1e293b;
+            color: var(--color-text);
             line-height: 1.5;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            text-rendering: optimizeLegibility;
         }
 
         .container {
@@ -20,18 +71,44 @@
         }
 
         .header {
-            background: linear-gradient(135deg, #0b5cab 0%, #063d73 100%);
-            color: white;
-            padding: 28px 32px;
+            background: linear-gradient(135deg, var(--color-charcoal-deep) 0%, var(--color-charcoal) 100%);
+            color: #faf7f2;
+            padding: 24px 32px;
             border-radius: 20px 20px 0 0;
-            box-shadow: 0 8px 24px rgba(11, 92, 171, 0.22);
+            box-shadow: var(--shadow-soft);
+            border-bottom: 3px solid var(--color-gold);
         }
 
         .header-top {
             display: flex;
             align-items: flex-start;
             justify-content: space-between;
+            gap: 20px;
+        }
+
+        .header-brand {
+            display: flex;
+            align-items: flex-start;
             gap: 16px;
+        }
+
+        .header-icon {
+            flex-shrink: 0;
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            background: rgba(184, 146, 42, 0.14);
+            border: 1px solid rgba(212, 175, 55, 0.35);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--color-gold-light);
+        }
+
+        .header-icon svg {
+            width: 26px;
+            height: 26px;
+            fill: currentColor;
         }
 
         .header h1 {
@@ -39,17 +116,54 @@
             font-size: 28px;
             font-weight: 700;
             letter-spacing: -0.03em;
+            color: #fffdf8;
+        }
+
+        .header-subtitle {
+            margin: 4px 0 0;
+            font-size: 13px;
+            font-weight: 700;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: var(--color-gold-light);
+        }
+
+        .header-meta {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 8px;
+        }
+
+        .status-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(212, 175, 55, 0.28);
+            padding: 8px 14px;
+            border-radius: 999px;
+            white-space: nowrap;
+            color: #f5f0e6;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #4ade80;
+            box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.18);
+            animation: status-pulse 2.4s ease-in-out infinite;
         }
 
         .header-tag {
             font-size: 12px;
             font-weight: 600;
             letter-spacing: 0.02em;
-            background: rgba(255, 255, 255, 0.14);
-            border: 1px solid rgba(255, 255, 255, 0.22);
-            padding: 8px 14px;
-            border-radius: 10px;
-            white-space: nowrap;
+            color: #d4c9b8;
         }
 
         .header-tag-divider {
@@ -57,36 +171,40 @@
             margin: 0 6px;
         }
 
-        .header p {
+        .header-desc {
             margin: 10px 0 0;
             font-size: 15px;
-            opacity: 0.9;
+            opacity: 0.88;
             max-width: 640px;
+            color: #e8dfd0;
+            line-height: 1.55;
         }
 
         .chatbox {
-            background: white;
+            background: var(--color-cream-card);
             padding: 28px 32px 32px;
             border-radius: 0 0 20px 20px;
-            box-shadow: 0 12px 40px rgba(15, 23, 42, 0.07);
+            box-shadow: var(--shadow-soft);
+            border: 1px solid var(--color-border);
+            border-top: none;
         }
 
         .dashboard-stats {
             display: grid;
             grid-template-columns: repeat(4, 1fr);
             gap: 16px;
-            margin-bottom: 28px;
+            margin-bottom: 32px;
         }
 
         .stat-card {
-            background: #f8fafc;
-            border: 1px solid #e2e8f0;
+            background: var(--color-cream-light);
+            border: 1px solid var(--color-border);
             border-radius: 16px;
             padding: 18px 20px;
             display: flex;
             flex-direction: column;
             gap: 6px;
-            transition: box-shadow 0.2s ease, transform 0.2s ease;
+            transition: box-shadow 0.2s ease, transform 0.2s ease, border-color 0.2s ease;
             cursor: pointer;
             text-align: left;
             font: inherit;
@@ -94,12 +212,17 @@
         }
 
         .stat-card:hover {
-            box-shadow: 0 6px 20px rgba(15, 23, 42, 0.08);
+            box-shadow: var(--shadow-card);
             transform: translateY(-2px);
+            border-color: var(--color-gold-muted);
+        }
+
+        .stat-card:has(.stat-value.loading) {
+            opacity: 0.92;
         }
 
         .stat-card:focus-visible {
-            outline: 2px solid #0b5cab;
+            outline: 2px solid var(--color-gold);
             outline-offset: 2px;
         }
 
@@ -112,26 +235,28 @@
             font-weight: 700;
             text-transform: uppercase;
             letter-spacing: 0.06em;
-            color: #64748b;
+            color: var(--color-brown-muted);
         }
 
         .stat-value {
             font-size: 32px;
             font-weight: 700;
-            color: #0f172a;
+            color: var(--color-charcoal);
             letter-spacing: -0.02em;
             line-height: 1.1;
         }
 
         .stat-value.loading {
-            color: #94a3b8;
-            font-size: 24px;
+            color: #a89888;
+            font-size: 28px;
+            letter-spacing: 0.08em;
+            animation: pulse-soft 1.4s ease-in-out infinite;
         }
 
-        .stat-card.stat-customers { border-top: 3px solid #0b5cab; }
-        .stat-card.stat-overdue { border-top: 3px solid #dc2626; }
-        .stat-card.stat-risk { border-top: 3px solid #ea580c; }
-        .stat-card.stat-collateral { border-top: 3px solid #7c3aed; }
+        .stat-card.stat-customers { border-top: 3px solid var(--color-gold); }
+        .stat-card.stat-overdue { border-top: 3px solid var(--color-overdue); }
+        .stat-card.stat-risk { border-top: 3px solid var(--color-risk); }
+        .stat-card.stat-collateral { border-top: 3px solid var(--color-brown); }
 
         button.stat-card {
             appearance: none;
@@ -139,16 +264,33 @@
         }
 
         .workspace-section {
-            margin-bottom: 24px;
+            margin-bottom: 28px;
         }
 
         .section-label {
-            font-size: 12px;
+            font-size: 11px;
             font-weight: 700;
-            color: #64748b;
-            margin-bottom: 10px;
+            color: var(--color-brown);
+            margin-bottom: 12px;
             text-transform: uppercase;
-            letter-spacing: 0.5px;
+            letter-spacing: 0.1em;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .section-label::before {
+            content: "";
+            width: 14px;
+            height: 2px;
+            border-radius: 999px;
+            background: var(--color-gold);
+            flex-shrink: 0;
+        }
+
+        .section-label + .section-label,
+        .section-label.spaced {
+            margin-top: 20px;
         }
 
         .quick-buttons {
@@ -157,26 +299,92 @@
             gap: 10px;
         }
 
+        .suggested-prompts {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-bottom: 18px;
+        }
+
+        .welcome-list {
+            list-style: none;
+            padding: 0;
+            margin: 20px auto 0;
+            max-width: 520px;
+            display: grid;
+            gap: 10px;
+            text-align: left;
+        }
+
+        .welcome-list li {
+            position: relative;
+            padding-left: 18px;
+            font-size: 14px;
+            color: var(--color-text-muted);
+            line-height: 1.5;
+        }
+
+        .welcome-list li::before {
+            content: "";
+            position: absolute;
+            left: 0;
+            top: 0.62em;
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: var(--color-gold);
+        }
+
         button {
             width: 100%;
-            padding: 12px 14px;
+            padding: 12px 16px;
             font-size: 14px;
             box-sizing: border-box;
-            border-radius: 10px;
+            border-radius: var(--radius-md);
             border: none;
             cursor: pointer;
             font-weight: 600;
+            line-height: 1.35;
+            min-height: 44px;
+            transition: background var(--transition-fast), border-color var(--transition-fast),
+                color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
+        }
+
+        button:focus-visible {
+            outline: 2px solid var(--color-gold);
+            outline-offset: 2px;
+        }
+
+        button:active:not(:disabled) {
+            transform: translateY(1px);
         }
 
         .quick-buttons button {
-            background: #f8fbff;
-            color: #0b5cab;
-            border: 1px solid #cfe0f5;
-            transition: background 0.15s ease;
+            background: var(--color-cream-light);
+            color: var(--color-charcoal);
+            border: 1px solid var(--color-border-strong);
         }
 
         .quick-buttons button:hover {
-            background: #eaf3ff;
+            background: #f3ead8;
+            border-color: var(--color-gold);
+            color: var(--color-charcoal-deep);
+            box-shadow: 0 2px 8px rgba(44, 40, 36, 0.06);
+        }
+
+        .suggested-prompts button {
+            background: #fff;
+            color: var(--color-brown);
+            border: 1px dashed var(--color-border-strong);
+            font-weight: 600;
+        }
+
+        .suggested-prompts button:hover {
+            background: #f8f2e8;
+            border-style: solid;
+            border-color: var(--color-gold);
+            color: var(--color-charcoal);
+            box-shadow: 0 2px 8px rgba(44, 40, 36, 0.05);
         }
 
         .input-row {
@@ -187,57 +395,99 @@
 
         input {
             flex: 1;
-            padding: 13px 14px;
+            padding: 13px 16px;
             font-size: 15px;
-            border-radius: 10px;
-            border: 1px solid #d7e0ea;
-            background: #fbfdff;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--color-border-strong);
+            background: #fff;
+            color: var(--color-text);
+            min-height: 44px;
+            transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+        }
+
+        input::placeholder {
+            color: #a89888;
         }
 
         input:focus {
-            outline: 2px solid #b7d3f5;
-            border-color: #0b5cab;
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(184, 146, 42, 0.18);
+            border-color: var(--color-gold);
         }
 
         .send-btn {
             width: 130px;
-            background: #0b5cab;
-            color: white;
+            background: var(--color-charcoal);
+            color: #fffdf8;
+            border: 1px solid var(--color-charcoal-deep);
+            box-shadow: 0 2px 8px rgba(30, 27, 24, 0.18);
         }
 
         .send-btn:hover {
-            background: #084b8f;
+            background: var(--color-charcoal-deep);
+            box-shadow: 0 4px 12px rgba(30, 27, 24, 0.22);
         }
 
         .answer {
-            margin-top: 8px;
-            background: #f8fafc;
-            border: 1px solid #e2e8f0;
-            padding: 20px;
-            border-radius: 16px;
-            min-height: 140px;
+            margin-top: 10px;
+            background: var(--color-cream-light);
+            border: 1px solid var(--color-border);
+            padding: 24px;
+            border-radius: var(--radius-lg);
+            min-height: 160px;
             max-height: 620px;
             overflow-y: auto;
+            scrollbar-color: var(--color-border-strong) transparent;
+            scrollbar-width: thin;
+        }
+
+        .answer::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .answer::-webkit-scrollbar-thumb {
+            background: var(--color-border-strong);
+            border-radius: 999px;
         }
 
         .empty-state {
             text-align: center;
-            padding: 36px 20px;
+            padding: 44px 24px;
+        }
+
+        .empty-icon {
+            width: 56px;
+            height: 56px;
+            margin: 0 auto 18px;
+            border-radius: 14px;
+            background: rgba(184, 146, 42, 0.1);
+            border: 1px solid rgba(184, 146, 42, 0.22);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--color-gold);
+        }
+
+        .empty-icon svg {
+            width: 28px;
+            height: 28px;
+            fill: currentColor;
         }
 
         .empty-title {
-            font-size: 17px;
+            font-size: 19px;
             font-weight: 700;
-            color: #1f2937;
-            margin-bottom: 6px;
+            color: var(--color-charcoal);
+            margin-bottom: 10px;
+            letter-spacing: -0.01em;
         }
 
         .empty-text {
             font-size: 14px;
-            color: #64748b;
-            max-width: 560px;
-            margin: auto;
-            line-height: 1.5;
+            color: var(--color-text-muted);
+            max-width: 520px;
+            margin: 0 auto;
+            line-height: 1.6;
         }
 
         .user-message {
@@ -256,29 +506,31 @@
             box-shadow: none;
             display: flex;
             flex-direction: column;
-            gap: 16px;
+            gap: 18px;
         }
 
         .query-header {
-            padding: 14px 18px;
-            font-size: 13px;
+            padding: 16px 20px;
+            font-size: 15px;
             font-weight: 600;
-            color: #64748b;
-            letter-spacing: 0.02em;
-            line-height: 1.4;
-            background: white;
-            border: 1px solid #e2e8f0;
-            border-radius: 12px;
+            color: var(--color-charcoal);
+            letter-spacing: 0.01em;
+            line-height: 1.5;
+            background: #fff;
+            border: 1px solid var(--color-border);
+            border-left: 4px solid var(--color-gold);
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-card);
         }
 
         .query-header::before {
-            content: "Question";
+            content: "Your Question";
             display: block;
             font-size: 10px;
             font-weight: 700;
             text-transform: uppercase;
             letter-spacing: 0.08em;
-            color: #94a3b8;
+            color: var(--color-gold);
             margin-bottom: 4px;
         }
 
@@ -286,12 +538,56 @@
             padding: 16px 18px 18px;
             font-size: 14px;
             line-height: 1.65;
-            color: #1f2937;
+            color: var(--color-text);
+        }
+
+        .copilot-body ul,
+        .copilot-body ol {
+            margin: 0.75em 0;
+            padding-left: 1.4em;
+        }
+
+        .copilot-body li {
+            margin: 0.35em 0;
+        }
+
+        .copilot-body strong,
+        .copilot-body b {
+            color: var(--color-charcoal);
+            font-weight: 700;
+        }
+
+        .copilot-body a {
+            color: var(--color-gold);
+            font-weight: 600;
+            text-decoration: underline;
+            text-underline-offset: 2px;
+        }
+
+        .copilot-body table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 0.75em 0;
+            font-size: 13px;
+        }
+
+        .copilot-body th,
+        .copilot-body td {
+            border: 1px solid var(--color-border);
+            padding: 8px 10px;
+            text-align: left;
+        }
+
+        .copilot-body th {
+            background: #f3ead8;
+            color: var(--color-brown);
+            font-weight: 700;
         }
 
         .copilot-body.typing {
-            color: #64748b;
+            color: var(--color-brown-muted);
             font-style: italic;
+            animation: pulse-soft 1.2s ease-in-out infinite;
         }
 
         .copilot-response {
@@ -303,7 +599,7 @@
         .response-title {
             font-size: 18px;
             font-weight: 700;
-            color: #0b5cab;
+            color: var(--color-gold);
         }
 
         .response-section {
@@ -323,11 +619,11 @@
         }
 
         .customer-card {
-            background: #ffffff;
-            border: 1px solid #e2e8f0;
+            background: #fff;
+            border: 1px solid var(--color-border);
             border-radius: 14px;
             padding: 16px 18px;
-            box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
+            box-shadow: var(--shadow-card);
             display: flex;
             flex-direction: column;
             gap: 10px;
@@ -375,15 +671,15 @@
         }
 
         .badge-collateral {
-            background: #f5f3ff;
-            color: #6d28d9;
-            border: 1px solid #ddd6fe;
+            background: #f5efe4;
+            color: var(--color-brown);
+            border: 1px solid #ddd0bc;
         }
 
         .badge-neutral {
-            background: #eff6ff;
-            color: #1d4ed8;
-            border: 1px solid #bfdbfe;
+            background: #f5efe4;
+            color: var(--color-brown-muted);
+            border: 1px solid var(--color-border);
         }
 
         .badge-paid,
@@ -444,13 +740,13 @@
             font-weight: 700;
             text-transform: uppercase;
             letter-spacing: 0.04em;
-            color: #64748b;
+            color: var(--color-brown-muted);
         }
 
         .field-value {
             font-size: 14px;
             font-weight: 600;
-            color: #1f2937;
+            color: var(--color-charcoal);
         }
 
         .card-action {
@@ -476,23 +772,23 @@
         }
 
         .action-banner {
-            background: linear-gradient(135deg, #eff6ff 0%, #f0fdf4 100%);
-            border: 1px solid #bfdbfe;
+            background: linear-gradient(135deg, #faf7f2 0%, #f3ead8 100%);
+            border: 1px solid var(--color-border-strong);
             border-radius: 14px;
             padding: 16px 18px;
-            box-shadow: 0 4px 14px rgba(11, 92, 171, 0.08);
+            box-shadow: var(--shadow-card);
         }
 
         .action-banner-text {
             font-size: 16px;
             font-weight: 700;
-            color: #111827;
+            color: var(--color-charcoal);
             line-height: 1.4;
         }
 
         .action-banner-detail {
             font-size: 13px;
-            color: #475569;
+            color: var(--color-text-muted);
             margin-top: 8px;
             line-height: 1.5;
         }
@@ -502,7 +798,7 @@
             font-weight: 700;
             text-transform: uppercase;
             letter-spacing: 0.04em;
-            color: #64748b;
+            color: var(--color-brown-muted);
             margin-right: 6px;
         }
 
@@ -512,11 +808,13 @@
             gap: 12px;
             margin-top: 14px;
             padding-top: 14px;
-            border-top: 1px solid #dbeafe;
+            border-top: 1px solid var(--color-border);
         }
 
         .action-banner-metrics .field-value {
             white-space: nowrap;
+            color: var(--color-gold);
+            font-weight: 700;
         }
 
         .action-banner-kpis {
@@ -618,10 +916,15 @@
         .view-card {
             margin: 0;
             background: #fff;
-            border: 1px solid #e2e8f0;
-            border-radius: 16px;
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-lg);
             overflow: hidden;
-            box-shadow: 0 4px 16px rgba(15, 23, 42, 0.04);
+            box-shadow: var(--shadow-card);
+            transition: box-shadow var(--transition-medium);
+        }
+
+        .view-card:not(.hidden):hover {
+            box-shadow: 0 6px 20px rgba(44, 40, 36, 0.08);
         }
 
         .view-card.hidden {
@@ -646,12 +949,17 @@
         }
 
         .view-card-summary {
-            border-left: 4px solid #0b5cab;
+            border-left: 4px solid var(--color-gold);
         }
 
         .view-card-summary .view-card-title {
-            background: linear-gradient(135deg, #eff6ff 0%, #f8fafc 100%);
-            color: #0b5cab;
+            background: linear-gradient(135deg, #faf7f2 0%, #f3ead8 100%);
+            color: var(--color-brown);
+        }
+
+        .view-card-summary .view-card-title::before {
+            content: "TellerIQ · ";
+            color: var(--color-gold);
         }
 
         .view-card-summary .view-card-body {
@@ -661,16 +969,16 @@
         .view-card-summary .business-summary {
             font-size: 15px;
             line-height: 1.7;
-            color: #334155;
+            color: var(--color-text);
         }
 
         .view-card-results {
-            border-left: 4px solid #6366f1;
+            border-left: 4px solid var(--color-brown-muted);
         }
 
         .view-card-results .view-card-title {
-            background: linear-gradient(135deg, #eef2ff 0%, #f8fafc 100%);
-            color: #4338ca;
+            background: linear-gradient(135deg, #f5efe4 0%, #faf7f2 100%);
+            color: var(--color-brown);
         }
 
         .view-card-results .view-card-body {
@@ -713,21 +1021,23 @@
         .query-details-toggle {
             margin: 0;
             width: 100%;
-            background: #f8fafc;
-            color: #64748b;
-            border: 1px dashed #cbd5e1;
-            border-radius: 10px;
+            background: var(--color-cream-light);
+            color: var(--color-brown-muted);
+            border: 1px dashed var(--color-border-strong);
+            border-radius: var(--radius-md);
             font-size: 12px;
             font-weight: 600;
             font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-            padding: 10px 14px;
-            transition: background 0.15s ease, color 0.15s ease;
+            padding: 11px 14px;
+            min-height: 44px;
+            transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
         }
 
         .query-details-toggle:hover {
-            background: #f1f5f9;
-            color: #334155;
-            border-color: #94a3b8;
+            background: #f3ead8;
+            color: var(--color-charcoal);
+            border-color: var(--color-gold);
+            border-style: solid;
         }
 
         .view-card-title {
@@ -735,8 +1045,8 @@
             font-size: 11px;
             font-weight: 700;
             text-transform: uppercase;
-            letter-spacing: 0.08em;
-            border-bottom: 1px solid #e2e8f0;
+            letter-spacing: 0.1em;
+            border-bottom: 1px solid var(--color-border);
         }
 
         .view-card-body {
@@ -777,7 +1087,7 @@
         .detail-subtitle {
             font-size: 13px;
             font-weight: 600;
-            color: #0b5cab;
+            color: var(--color-gold);
             margin: 12px 0 8px;
         }
 
@@ -791,18 +1101,19 @@
         }
 
         .query-sql {
-            background: #f8fbff;
-            border: 1px solid #e2ebf7;
+            background: var(--color-charcoal-deep);
+            border: 1px solid var(--color-charcoal);
             border-radius: 8px;
             padding: 10px 12px;
             overflow-x: auto;
             margin: 0;
             font-size: 12px;
+            color: #e8dfd0;
         }
 
         .results-table-wrap {
             overflow-x: auto;
-            border: 1px solid #e2e8f0;
+            border: 1px solid var(--color-border);
             border-radius: 12px;
             background: white;
         }
@@ -820,14 +1131,14 @@
 
         .results-table th,
         .results-table td {
-            padding: 8px 12px;
-            border-bottom: 1px solid #e8eef5;
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--color-border);
             text-align: left;
         }
 
         .results-table th {
-            background: #f8fafc;
-            color: #475569;
+            background: #f3ead8;
+            color: var(--color-brown);
             font-weight: 700;
             font-size: 11px;
             text-transform: uppercase;
@@ -835,12 +1146,16 @@
             white-space: nowrap;
         }
 
+        .results-table tbody tr:nth-child(even) {
+            background: #fcfaf6;
+        }
+
         .results-table tbody tr:hover {
-            background: #f8fafc;
+            background: #f3ead8;
         }
 
         .results-table td {
-            color: #334155;
+            color: var(--color-text);
         }
 
         .results-table tr:last-child td,
@@ -889,21 +1204,22 @@
 
         .footer {
             text-align: center;
-            margin-top: 24px;
-            padding-top: 8px;
+            margin-top: 28px;
+            padding-top: 16px;
+            border-top: 1px solid var(--color-border);
         }
 
         .footer-brand {
             font-size: 13px;
             font-weight: 700;
-            color: #475569;
+            color: var(--color-brown);
             letter-spacing: 0.01em;
         }
 
         .footer-powered {
             margin-top: 4px;
             font-size: 12px;
-            color: #94a3b8;
+            color: #a89888;
             letter-spacing: 0.02em;
         }
 
@@ -916,13 +1232,13 @@
         .tiq-page-title {
             font-size: 20px;
             font-weight: 700;
-            color: #0b5cab;
+            color: var(--color-gold);
             padding-bottom: 4px;
         }
 
         .tiq-section {
-            background: #f8fbff;
-            border: 1px solid #e2ebf7;
+            background: var(--color-cream-light);
+            border: 1px solid var(--color-border);
             border-radius: 12px;
             padding: 14px 16px;
         }
@@ -930,7 +1246,7 @@
         .tiq-section-title {
             font-size: 15px;
             font-weight: 700;
-            color: #1e3a5f;
+            color: var(--color-charcoal);
             margin-bottom: 12px;
         }
 
@@ -953,7 +1269,7 @@
 
         .tiq-mini-card {
             background: white;
-            border: 1px solid #dbe7f5;
+            border: 1px solid var(--color-border);
             border-radius: 10px;
             padding: 12px 14px;
         }
@@ -961,7 +1277,7 @@
         .tiq-mini-card-title {
             font-size: 14px;
             font-weight: 700;
-            color: #0b5cab;
+            color: var(--color-gold);
             margin-bottom: 6px;
         }
 
@@ -980,11 +1296,11 @@
 
         .tiq-customer-card {
             background: white;
-            border: 1px solid #dbe7f5;
-            border-left: 4px solid #0b5cab;
+            border: 1px solid var(--color-border);
+            border-left: 4px solid var(--color-gold);
             border-radius: 12px;
             padding: 14px 16px;
-            box-shadow: 0 2px 6px rgba(15, 23, 42, 0.04);
+            box-shadow: var(--shadow-card);
         }
 
         .tiq-card-header {
@@ -1002,9 +1318,9 @@
         }
 
         .tiq-badge {
-            background: #eef5ff;
-            color: #0b5cab;
-            border: 1px solid #b7d3f5;
+            background: #f5efe4;
+            color: var(--color-brown);
+            border: 1px solid var(--color-border-strong);
             border-radius: 999px;
             font-size: 11px;
             font-weight: 700;
@@ -1035,6 +1351,16 @@
             height: 10px;
         }
 
+        @media (prefers-reduced-motion: reduce) {
+            *,
+            *::before,
+            *::after {
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.01ms !important;
+            }
+        }
+
         @media (max-width: 900px) {
             .dashboard-stats {
                 grid-template-columns: repeat(2, 1fr);
@@ -1046,15 +1372,21 @@
                 grid-template-columns: 1fr;
             }
 
-            .header-top {
+            .header-top,
+            .header-brand {
                 flex-direction: column;
+            }
+
+            .header-meta {
+                align-items: flex-start;
             }
 
             .chatbox {
                 padding: 20px 18px 24px;
             }
 
-            .quick-buttons {
+            .quick-buttons,
+            .suggested-prompts {
                 grid-template-columns: 1fr;
             }
 
@@ -1078,13 +1410,24 @@
 <div class="container">
     <div class="header">
         <div class="header-top">
-            <div>
-                <h1>TellerIQ</h1>
-                <p>Banking operations copilot for loan follow-ups, portfolio risk, and collateral tracking.</p>
+            <div class="header-brand">
+                <div class="header-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" role="img" aria-label="">
+                        <path d="M12 2c-.8 0-1.5.4-1.9 1.1L5.8 9.2c-.3.5-.5 1.1-.5 1.7V18c0 1.1.9 2 2 2h1v-5h6v5h1c1.1 0 2-.9 2-2v-7.1c0-.6-.2-1.2-.5-1.7L13.9 3.1C13.5 2.4 12.8 2 12 2zm-2 16v-3h4v3h-4z"/>
+                    </svg>
+                </div>
+                <div>
+                    <h1>TellerIQ</h1>
+                    <p class="header-subtitle">Pawnshop Operations Assistant</p>
+                    <p class="header-desc">Search customer records, review overdue payments, monitor high-LTV loans, and track collateral and forfeiture risk from one operations dashboard.</p>
+                </div>
             </div>
-            <span class="header-tag" id="portfolioStatus">
-                Portfolio Status<span class="header-tag-divider">|</span><span id="headerDate"></span>
-            </span>
+            <div class="header-meta">
+                <span class="status-indicator"><span class="status-dot"></span>Operations Online</span>
+                <span class="header-tag" id="portfolioStatus">
+                    Portfolio Status<span class="header-tag-divider">|</span><span id="headerDate"></span>
+                </span>
+            </div>
         </div>
     </div>
 
@@ -1095,52 +1438,75 @@
                 <span class="stat-value loading" id="statCustomers">N/A</span>
             </button>
             <button type="button" class="stat-card stat-overdue" onclick="loadOverdue()" aria-label="Show overdue customers">
-                <span class="stat-label">Overdue Accounts</span>
+                <span class="stat-label">Overdue Payments</span>
                 <span class="stat-value loading" id="statOverdue">N/A</span>
             </button>
             <button type="button" class="stat-card stat-risk" onclick="loadHighRiskLoans()" aria-label="Show high risk loans">
-                <span class="stat-label">High Risk Loans</span>
+                <span class="stat-label">High-LTV Loans</span>
                 <span class="stat-value loading" id="statHighRisk">N/A</span>
             </button>
             <button type="button" class="stat-card stat-collateral" onclick="loadCollateralAtRisk()" aria-label="Show collateral at risk">
-                <span class="stat-label">Collateral At Risk</span>
+                <span class="stat-label">Forfeiture Risk</span>
                 <span class="stat-value loading" id="statCollateral">N/A</span>
             </button>
         </div>
 
         <div class="workspace-section">
-            <div class="section-label">Quick Actions</div>
+            <div class="section-label">Operations Shortcuts</div>
 
             <div class="quick-buttons">
                 <button type="button" onclick="loadTodayPriorities()">Today's Priorities</button>
-                <button type="button" onclick="loadDueSoon()">Due Soon</button>
-                <button type="button" onclick="loadOverdue()">Overdue Customers</button>
+                <button type="button" onclick="loadDueSoon()">Payments Due Soon</button>
+                <button type="button" onclick="loadOverdue()">Overdue Payments</button>
                 <button type="button" onclick="loadMissedPayments()">Missed Payments</button>
-                <button type="button" onclick="loadHighRiskLoans()">High Risk Loans</button>
-                <button type="button" onclick="loadCollateralAtRisk()">Collateral At Risk</button>
+                <button type="button" onclick="loadHighRiskLoans()">High-LTV Loans</button>
+                <button type="button" onclick="loadCollateralAtRisk()">Collateral at Risk</button>
+            </div>
+
+            <div class="section-label spaced">Suggested Prompts</div>
+
+            <div class="suggested-prompts">
+                <button type="button" onclick="document.getElementById('userQuestion').value='Who is overdue?'; sendQuestion();">Who is overdue?</button>
+                <button type="button" onclick="document.getElementById('userQuestion').value=&quot;Show today's priorities&quot;; sendQuestion();">Show today's priorities</button>
+                <button type="button" onclick="document.getElementById('userQuestion').value='Which collateral is at risk?'; sendQuestion();">Which collateral is at risk?</button>
+                <button type="button" onclick="document.getElementById('userQuestion').value='Show high-risk loans'; sendQuestion();">Show high-risk loans</button>
+                <button type="button" onclick="document.getElementById('userQuestion').value='Find customer Priya Nair'; sendQuestion();">Find customer Priya Nair</button>
+                <button type="button" onclick="document.getElementById('userQuestion').value='Show loans over $1,000'; sendQuestion();">Show loans over $1,000</button>
             </div>
 
             <div class="input-row">
-                <input type="text" id="userQuestion" placeholder="Who should I call first today?">
+                <input type="text" id="userQuestion" placeholder="Who is overdue today?">
                 <button class="send-btn" type="button" onclick="sendQuestion()">Send</button>
             </div>
         </div>
 
         <div class="workspace-section">
-            <div class="section-label">Copilot Response</div>
+            <div class="section-label">Operations Response</div>
             <div class="answer" id="answer">
                 <div class="empty-state" id="emptyState">
-                    <div class="empty-title">Ready to review today's priorities</div>
-                    <div class="empty-text">
-                        Ask a question in plain English or pick a quick action. TellerIQ returns structured, banker-friendly responses from live portfolio data.
+                    <div class="empty-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" role="img" aria-label="">
+                            <path d="M4 6h16v12H4V6zm2 2v8h12V8H6zm2 2h8v1.5H8V10zm0 2.5h5V14H8v-1.5z"/>
+                        </svg>
                     </div>
+                    <div class="empty-title">Welcome to your pawnshop operations dashboard</div>
+                    <div class="empty-text">
+                        Ask about customer records, loan balances, payments, collateral, or daily follow-ups. TellerIQ returns structured responses from live portfolio data.
+                    </div>
+                    <ul class="welcome-list">
+                        <li>Search customers and loans</li>
+                        <li>Review overdue payments</li>
+                        <li>Monitor high-LTV loans</li>
+                        <li>Track collateral and forfeiture risk</li>
+                        <li>View daily priorities</li>
+                    </ul>
                 </div>
             </div>
         </div>
     </div>
 
     <div class="footer">
-        <div class="footer-brand">TellerIQ Banking Operations Copilot</div>
+        <div class="footer-brand">TellerIQ Pawnshop Operations Assistant</div>
         <div class="footer-powered">Powered by Gemini, Flask, and MySQL</div>
     </div>
 </div>
@@ -1151,11 +1517,11 @@ const conversationHistory = [];
 const DEBUG_MODE = new URLSearchParams(window.location.search).get("debug") === "1";
 
 const PLACEHOLDER_EXAMPLES = [
-    "Who should I call first today?",
-    "Show overdue customers.",
-    "Summarize customer 1.",
-    "What collateral is at risk?",
+    "Who is overdue?",
+    "Show today's priorities.",
+    "Which collateral is at risk?",
     "Show high-risk loans.",
+    "Find customer Priya Nair.",
 ];
 let placeholderIndex = 0;
 const DISPLAY_PLACEHOLDER = "N/A";
