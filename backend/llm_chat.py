@@ -632,6 +632,7 @@ def _finalize_gemini_turn(
     classification: IntentClassification,
     tools_used: list,
     executions: list[tuple[str, dict, object]],
+    message: str = "",
 ) -> dict:
     reply_text = (response.text or "").strip()
     if reply_text:
@@ -650,6 +651,11 @@ def _finalize_gemini_turn(
             classification,
             executions,
         )
+
+    # Gemini completed with a blank turn (no text, no tools). Use the classifier
+    # only as a last-resort fallback when that intent is already operationally executable.
+    if _can_execute_operationally(classification):
+        return _execute_classification(message, classification)
 
     return _message_html(
         CLARIFYING_MESSAGE,
@@ -737,6 +743,7 @@ def _chat_with_gemini(message: str, history: list | None, classification: Intent
                 classification,
                 tools_used,
                 executions,
+                message=message,
             )
 
         if response.candidates and response.candidates[0].content:

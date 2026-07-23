@@ -279,6 +279,95 @@ class ChatRoutingTests(unittest.TestCase):
 
         self.assertIn("could not compose a final answer", result["reply"].lower())
 
+    @patch("llm_chat._execute_classification")
+    def test_empty_gemini_turn_falls_back_for_executable_overdue(
+        self,
+        mock_execute,
+    ):
+        classification = classify_intent("Show me all overdue customers.")
+        self.assertTrue(llm_chat._can_execute_operationally(classification))
+        mock_execute.return_value = {
+            "reply": "<p>4 overdue customers</p>",
+            "format": "html",
+            "history_text": "Provided overdue customer list.",
+            "tools_used": [{"tool": "get_overdue_customers", "args": {}}],
+            "query_details": {"queries": [{"rows": [{"full_name": "Asha Patel"}] * 4}]},
+        }
+
+        with _patch_gemini_responses([_make_gemini_response(text=None)]):
+            result = llm_chat.chat("Show me all overdue customers.")
+
+        mock_execute.assert_called_once()
+        self.assertEqual(
+            mock_execute.call_args.args[0],
+            "Show me all overdue customers.",
+        )
+        self.assertEqual(mock_execute.call_args.args[1].intent, "OVERDUE_CUSTOMERS")
+        self.assertIn("4 overdue customers", result["reply"])
+        self.assertEqual(
+            result.get("tools_used"),
+            [{"tool": "get_overdue_customers", "args": {}}],
+        )
+
+    @patch("llm_chat._execute_classification")
+    def test_empty_gemini_turn_keeps_clarifying_for_unknown(
+        self,
+        mock_execute,
+    ):
+        responses = [_make_gemini_response(text=None)]
+
+        with _patch_gemini_responses(responses):
+            with patch("llm_chat.classify_intent") as mock_classify:
+                unknown = classify_intent("asdf qwerty zxcv")
+                unknown.intent = "UNKNOWN"
+                unknown.action = None
+                unknown.tool = None
+                unknown.confidence = 0.0
+                mock_classify.return_value = unknown
+                result = llm_chat.chat("asdf qwerty zxcv")
+
+        mock_execute.assert_not_called()
+        self.assertIn("portfolio analytics", result["reply"].lower())
+
+    @patch("llm_chat._execute_classification")
+    def test_gemini_text_response_skips_operational_fallback(
+        self,
+        mock_execute,
+    ):
+        with _patch_gemini_responses(
+            [_make_gemini_response(text="There are four overdue accounts.")]
+        ):
+            result = llm_chat.chat("Show me all overdue customers.")
+
+        mock_execute.assert_not_called()
+        self.assertIn("four overdue accounts", result["reply"].lower())
+
+    @patch("llm_chat._execute_classification")
+    @patch("llm_chat._execute_tool_call")
+    def test_gemini_tool_executions_skip_operational_fallback(
+        self,
+        mock_execute_tool,
+        mock_execute_classification,
+    ):
+        mock_execute_tool.return_value = {
+            "rows": [
+                {"full_name": "Asha Patel", "remaining_due": 850.0},
+            ]
+        }
+        responses = [
+            _make_gemini_response(
+                function_calls=[_make_function_call("get_overdue_customers", {})]
+            ),
+            _make_gemini_response(text=""),
+        ]
+
+        with _patch_gemini_responses(responses):
+            result = llm_chat.chat("Show me all overdue customers.")
+
+        mock_execute_classification.assert_not_called()
+        mock_execute_tool.assert_called_once()
+        self.assertIn("could not compose a final answer", result["reply"].lower())
+
     @patch("llm_chat._execute_tool_call")
     def test_execution_state_is_request_scoped(self, mock_execute_tool):
         mock_execute_tool.return_value = {"rows": [{"item_type": "Jewelry"}]}
