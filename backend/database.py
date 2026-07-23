@@ -30,7 +30,10 @@ def _clean(rows):
 def _execute(sql, params=None):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute(sql, params or ())
+    if params is None:
+        cursor.execute(sql)
+    else:
+        cursor.execute(sql, params)
     result = _clean(cursor.fetchall())
     cursor.close()
     conn.close()
