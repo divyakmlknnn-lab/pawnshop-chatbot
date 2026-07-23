@@ -24,6 +24,7 @@ from gemini_fallback import (
     call_gemini_with_retry,
     is_transient_gemini_error,
 )
+from gemini_text_html import gemini_text_to_html
 from query_details import build_query_details
 from query_trace import extract_rows
 from tools import (
@@ -473,12 +474,20 @@ def _text_to_html_response(
     tools_used: list,
     executions: list[tuple[str, dict, object]],
 ) -> dict:
-    paragraphs = [
-        f"<p>{html_module.escape(part.strip())}</p>"
-        for part in re.split(r"\n\s*\n", text.strip())
-        if part.strip()
-    ]
-    body = "".join(paragraphs) if paragraphs else f'<p class="empty-message">{html_module.escape(text)}</p>'
+    try:
+        body = gemini_text_to_html(text)
+    except Exception:
+        logger.exception("Gemini text to HTML conversion failed")
+        paragraphs = [
+            f"<p>{html_module.escape(part.strip())}</p>"
+            for part in re.split(r"\n\s*\n", text.strip())
+            if part.strip()
+        ]
+        body = (
+            "".join(paragraphs)
+            if paragraphs
+            else f'<p class="empty-message">{html_module.escape(text)}</p>'
+        )
     return html_response(
         body,
         history_text,

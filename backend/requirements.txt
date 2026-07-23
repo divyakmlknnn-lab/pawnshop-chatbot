@@ -4,3 +4,5 @@ pymysql
 google-genai
 python-dotenv
 gunicorn
+markdown
+bleach
