@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 from typing import Any
 
@@ -12,10 +13,17 @@ from mcp.client.stdio import stdio_client
 
 
 def _server_parameters() -> StdioServerParameters:
-    """Return the command used to launch the local MCP server."""
+    """Return the command used to launch the local MCP server.
+
+    Pass the parent process environment explicitly. The MCP stdio client
+    sanitizes the subprocess env when ``env`` is omitted, which drops
+    database credentials that Render injects as process environment
+    variables (and that are not available via a deployed ``.env`` file).
+    """
     return StdioServerParameters(
         command=sys.executable,
         args=["-m", "pawnshop_mcp.server"],
+        env=os.environ.copy(),
     )
 
 
