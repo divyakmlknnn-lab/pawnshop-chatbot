@@ -2,6 +2,7 @@ flask
 flask-cors
 pymysql
 google-genai
+anthropic
 python-dotenv
 gunicorn
 markdown

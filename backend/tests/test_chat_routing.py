@@ -87,6 +87,7 @@ class ChatRoutingTests(unittest.TestCase):
     ):
         mock_execute_tool.return_value = {
             "success": True,
+            "sql": "SELECT DISTINCT item_type FROM collateral_items LIMIT 100",
             "rows": [
                 {"item_type": "Jewelry"},
                 {"item_type": "Vehicle"},
@@ -99,8 +100,8 @@ class ChatRoutingTests(unittest.TestCase):
             _make_gemini_response(
                 function_calls=[
                     _make_function_call(
-                        "execute_safe_sql",
-                        {"sql": "SELECT DISTINCT item_type FROM collateral_items"},
+                        "generate_safe_sql",
+                        {"user_question": "What are the different collaterals"},
                     )
                 ]
             ),
@@ -114,7 +115,8 @@ class ChatRoutingTests(unittest.TestCase):
 
         tool_names = [entry["tool"] for entry in result.get("tools_used", [])]
         self.assertNotIn("get_overdue_customers", tool_names)
-        self.assertIn("execute_safe_sql", tool_names)
+        self.assertIn("generate_safe_sql", tool_names)
+        self.assertNotIn("execute_safe_sql", tool_names)
         self.assertIn("Jewelry", result["reply"])
         self.assertNotIn("overdue accounts requiring follow-up", result["reply"])
 
@@ -153,43 +155,26 @@ class ChatRoutingTests(unittest.TestCase):
         self.assertIn("75", result["reply"])
 
     @patch("llm_chat._execute_tool_call")
-    def test_loans_over_amount_recovers_from_invalid_column(self, mock_execute_tool):
-        def execute_side_effect(tool_name, tool_args):
-            if tool_name == "validate_safe_sql" and "amount" in tool_args.get("sql", ""):
-                return {
-                    "valid": False,
-                    "reason": "Unknown column: amount",
-                    "normalized_sql": None,
-                    "tables_used": ["loans"],
-                    "columns_used": [],
-                }
-            if tool_name == "execute_safe_sql":
-                return {
-                    "success": True,
-                    "rows": [
-                        {"loan_id": 1, "current_balance": 1500.0},
-                        {"loan_id": 5, "current_balance": 9000.0},
-                    ],
-                    "row_count": 2,
-                }
-            return {"success": False, "error": "unexpected tool"}
-
-        mock_execute_tool.side_effect = execute_side_effect
+    def test_loans_over_amount_uses_generate_safe_sql(self, mock_execute_tool):
+        mock_execute_tool.return_value = {
+            "success": True,
+            "sql": (
+                "SELECT loan_id, current_balance FROM loans "
+                "WHERE current_balance > 1000 LIMIT 100"
+            ),
+            "rows": [
+                {"loan_id": 1, "current_balance": 1500.0},
+                {"loan_id": 5, "current_balance": 9000.0},
+            ],
+            "row_count": 2,
+        }
 
         responses = [
             _make_gemini_response(
                 function_calls=[
                     _make_function_call(
-                        "validate_safe_sql",
-                        {"sql": "SELECT loan_id FROM loans WHERE amount > 1000"},
-                    )
-                ]
-            ),
-            _make_gemini_response(
-                function_calls=[
-                    _make_function_call(
-                        "execute_safe_sql",
-                        {"sql": "SELECT loan_id, current_balance FROM loans WHERE current_balance > 1000"},
+                        "generate_safe_sql",
+                        {"user_question": "Show loans over $1000"},
                     )
                 ]
             ),
@@ -202,9 +187,14 @@ class ChatRoutingTests(unittest.TestCase):
             result = llm_chat.chat("Show loans over $1000")
 
         tool_names = [entry["tool"] for entry in result.get("tools_used", [])]
-        self.assertIn("validate_safe_sql", tool_names)
-        self.assertIn("execute_safe_sql", tool_names)
+        self.assertIn("generate_safe_sql", tool_names)
+        self.assertNotIn("validate_safe_sql", tool_names)
+        self.assertNotIn("execute_safe_sql", tool_names)
         self.assertIn("$1,000", result["reply"])
+        mock_execute_tool.assert_called_once_with(
+            "generate_safe_sql",
+            {"user_question": "Show loans over $1000"},
+        )
 
     @patch("llm_chat._execute_tool_call")
     def test_overdue_query_uses_predefined_tool_via_gemini(self, mock_execute_tool):
@@ -370,14 +360,19 @@ class ChatRoutingTests(unittest.TestCase):
 
     @patch("llm_chat._execute_tool_call")
     def test_execution_state_is_request_scoped(self, mock_execute_tool):
-        mock_execute_tool.return_value = {"rows": [{"item_type": "Jewelry"}]}
+        mock_execute_tool.return_value = {
+            "success": True,
+            "sql": "SELECT item_type FROM collateral_items LIMIT 100",
+            "rows": [{"item_type": "Jewelry"}],
+            "row_count": 1,
+        }
 
         first_responses = [
             _make_gemini_response(
                 function_calls=[
                     _make_function_call(
-                        "execute_safe_sql",
-                        {"sql": "SELECT item_type FROM collateral_items"},
+                        "generate_safe_sql",
+                        {"user_question": "What are the different collaterals"},
                     )
                 ]
             ),
@@ -394,8 +389,215 @@ class ChatRoutingTests(unittest.TestCase):
             second = llm_chat.chat("Show loans over $1000")
 
         self.assertIn("Jewelry", first["reply"])
-        self.assertEqual(first.get("tools_used"), [{"tool": "execute_safe_sql", "args": {"sql": "SELECT item_type FROM collateral_items"}}])
+        self.assertEqual(
+            first.get("tools_used"),
+            [
+                {
+                    "tool": "generate_safe_sql",
+                    "args": {"user_question": "What are the different collaterals"},
+                }
+            ],
+        )
         self.assertEqual(second.get("tools_used"), [])
+
+
+class GenerateSafeSqlIntegrationTests(unittest.TestCase):
+    def test_gemini_declarations_include_generate_safe_sql_not_raw_mcp(self):
+        declarations = (
+            llm_chat._gemini_function_declarations()
+            + llm_chat._orchestration_function_declarations()
+        )
+        names = {item["name"] for item in declarations}
+        self.assertIn("generate_safe_sql", names)
+        self.assertNotIn("validate_safe_sql", names)
+        self.assertNotIn("execute_safe_sql", names)
+
+        generate_decl = next(
+            item for item in declarations if item["name"] == "generate_safe_sql"
+        )
+        self.assertEqual(generate_decl["parameters"]["required"], ["user_question"])
+        self.assertIn("user_question", generate_decl["parameters"]["properties"])
+
+    def test_raw_mcp_tools_are_rejected_as_gemini_tool_calls(self):
+        self.assertEqual(
+            llm_chat._validate_tool_call("validate_safe_sql"),
+            "Unknown tool: validate_safe_sql",
+        )
+        self.assertEqual(
+            llm_chat._validate_tool_call("execute_safe_sql"),
+            "Unknown tool: execute_safe_sql",
+        )
+        self.assertIsNone(llm_chat._validate_tool_call("generate_safe_sql"))
+        self.assertIsNone(llm_chat._validate_tool_call("get_overdue_customers"))
+
+    def test_prompt_requires_generate_safe_sql_not_authored_sql(self):
+        self.assertIn("generate_safe_sql", llm_chat.SYSTEM_PROMPT)
+        self.assertIn("Do not write, invent, or submit SQL yourself", llm_chat.SYSTEM_PROMPT)
+        self.assertIn(
+            "Never call validate_safe_sql or execute_safe_sql",
+            llm_chat.SYSTEM_PROMPT,
+        )
+
+    @patch("llm_chat.call_mcp_tool")
+    @patch("llm_chat.generate_sql_with_claude")
+    def test_generate_safe_sql_validates_then_executes(
+        self,
+        mock_claude,
+        mock_mcp,
+    ):
+        generated_sql = (
+            "SELECT loan_id, current_balance FROM loans "
+            "WHERE current_balance > 1000"
+        )
+        mock_claude.return_value = generated_sql
+
+        def mcp_side_effect(tool_name, arguments=None):
+            if tool_name == "validate_safe_sql":
+                return {
+                    "valid": True,
+                    "normalized_sql": generated_sql + " LIMIT 100",
+                    "reason": None,
+                    "tables_used": ["loans"],
+                    "columns_used": ["loan_id", "current_balance"],
+                }
+            if tool_name == "execute_safe_sql":
+                return {
+                    "success": True,
+                    "sql": generated_sql + " LIMIT 100",
+                    "rows": [
+                        {"loan_id": 1, "current_balance": 1500.0},
+                        {"loan_id": 5, "current_balance": 9000.0},
+                    ],
+                    "row_count": 2,
+                    "validation": {"valid": True, "tables_used": ["loans"]},
+                    "trace": {
+                        "tables_used": {"loans": []},
+                        "sql": generated_sql + " LIMIT 100",
+                        "rows": [
+                            {"loan_id": 1, "current_balance": 1500.0},
+                            {"loan_id": 5, "current_balance": 9000.0},
+                        ],
+                    },
+                }
+            raise AssertionError(f"Unexpected MCP tool: {tool_name}")
+
+        mock_mcp.side_effect = mcp_side_effect
+
+        responses = [
+            _make_gemini_response(
+                function_calls=[
+                    _make_function_call(
+                        "generate_safe_sql",
+                        {"user_question": "Show loans over $1000"},
+                    )
+                ]
+            ),
+            _make_gemini_response(text="Two loans have balances over $1,000."),
+        ]
+
+        with _patch_gemini_responses(responses):
+            result = llm_chat.chat("Show loans over $1000")
+
+        mock_claude.assert_called_once_with("Show loans over $1000")
+        self.assertEqual(
+            [call.args[0] for call in mock_mcp.call_args_list],
+            ["validate_safe_sql", "execute_safe_sql"],
+        )
+        self.assertEqual(
+            mock_mcp.call_args_list[0].args[1],
+            {"sql": generated_sql},
+        )
+        self.assertEqual(
+            mock_mcp.call_args_list[1].args[1],
+            {"sql": generated_sql},
+        )
+        self.assertIn("$1,000", result["reply"])
+        queries = result.get("query_details", {}).get("queries", [])
+        self.assertEqual(len(queries), 1)
+        self.assertEqual(queries[0]["tool"], "generate_safe_sql")
+        self.assertIn("current_balance > 1000", queries[0]["sql"])
+        self.assertEqual(queries[0]["row_count"], 2)
+
+    @patch("llm_chat.call_mcp_tool")
+    @patch("llm_chat.generate_sql_with_claude")
+    def test_invalid_sql_skips_execute_safe_sql(self, mock_claude, mock_mcp):
+        mock_claude.return_value = "SELECT amount FROM loans"
+        mock_mcp.return_value = {
+            "valid": False,
+            "reason": "Unknown column: amount",
+            "normalized_sql": None,
+            "tables_used": ["loans"],
+            "columns_used": [],
+        }
+
+        result = llm_chat._execute_generate_safe_sql(
+            {"user_question": "Show loans by amount"}
+        )
+
+        mock_mcp.assert_called_once_with(
+            "validate_safe_sql",
+            {"sql": "SELECT amount FROM loans"},
+        )
+        self.assertFalse(result["success"])
+        self.assertIn("Unknown column", result["error"])
+        self.assertEqual(result["rows"], [])
+
+    @patch("llm_chat.call_mcp_tool")
+    @patch(
+        "llm_chat.generate_sql_with_claude",
+        side_effect=llm_chat.SqlGenerationError("Claude SQL generation failed."),
+    )
+    def test_claude_failure_returns_safe_tool_error(self, _mock_claude, mock_mcp):
+        result = llm_chat._execute_generate_safe_sql(
+            {"user_question": "Show high balance loans"}
+        )
+
+        mock_mcp.assert_not_called()
+        self.assertEqual(
+            result,
+            {
+                "success": False,
+                "error": "Claude SQL generation failed.",
+            },
+        )
+
+    def test_missing_user_question_returns_safe_error(self):
+        result = llm_chat._execute_generate_safe_sql({})
+        self.assertFalse(result["success"])
+        self.assertIn("user_question", result["error"])
+
+        empty = llm_chat._execute_generate_safe_sql({"user_question": "   "})
+        self.assertFalse(empty["success"])
+        self.assertIn("user_question", empty["error"])
+
+    @patch("llm_chat.generate_sql_with_claude")
+    @patch("llm_chat._execute_tool_call")
+    def test_predefined_tools_skip_claude(
+        self,
+        mock_execute_tool,
+        mock_claude,
+    ):
+        mock_execute_tool.return_value = {
+            "rows": [{"full_name": "Asha Patel", "remaining_due": 850.0}]
+        }
+
+        responses = [
+            _make_gemini_response(
+                function_calls=[
+                    _make_function_call("get_overdue_customers", {})
+                ]
+            ),
+            _make_gemini_response(
+                text="There are overdue accounts requiring follow-up, including Asha Patel."
+            ),
+        ]
+
+        with _patch_gemini_responses(responses):
+            result = llm_chat.chat("Show overdue customers")
+
+        mock_claude.assert_not_called()
+        mock_execute_tool.assert_called_once_with("get_overdue_customers", {})
+        self.assertIn("Asha Patel", result["reply"])
 
 
 if __name__ == "__main__":
