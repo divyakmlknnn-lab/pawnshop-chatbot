@@ -1829,7 +1829,11 @@ function appendAnswerPanel(turn, options = {}) {
         panel.appendChild(summaryCard);
     }
 
-    transcript.appendChild(panel);
+    if (options.prepend) {
+        transcript.insertBefore(panel, transcript.firstChild);
+    } else {
+        transcript.appendChild(panel);
+    }
 }
 
 function renderConversation(extraTurn = null, extraOptions = {}) {
@@ -1845,12 +1849,18 @@ function renderConversation(extraTurn = null, extraOptions = {}) {
     transcript.className = "chat-transcript";
     answerBox.appendChild(transcript);
 
-    uiTurns.forEach((turn) => {
-        appendAnswerPanel(turn);
-    });
+    // Keep uiTurns chronological in storage; prepend while iterating so newest paints first.
+    for (let i = 0; i < uiTurns.length; i += 1) {
+        appendAnswerPanel(uiTurns[i], { prepend: true });
+    }
 
     if (extraTurn) {
-        appendAnswerPanel(extraTurn, extraOptions);
+        appendAnswerPanel(extraTurn, { ...extraOptions, prepend: true });
+    }
+
+    const newestPanel = transcript.querySelector(".copilot-panel");
+    if (newestPanel) {
+        newestPanel.scrollIntoView({ block: "start", behavior: "auto" });
     }
 }
 
