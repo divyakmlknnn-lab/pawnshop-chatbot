@@ -84,39 +84,6 @@ class McpTraceIntegrationTests(unittest.TestCase):
         self.assertEqual(query["row_count"], 2)
         self.assertIn("SELECT customer_id, full_name FROM customers", query["sql"])
 
-    def test_build_query_details_includes_generate_safe_sql_execution(self):
-        classification = classify_intent("Show customers with the highest balances")
-        executions = [
-            (
-                "generate_safe_sql",
-                {"user_question": "Show customers with the highest balances"},
-                MCP_RESULT,
-            )
-        ]
-
-        details = build_query_details(classification, executions)
-
-        self.assertEqual(len(details["queries"]), 1)
-        query = details["queries"][0]
-        self.assertEqual(query["tool"], "generate_safe_sql")
-        self.assertEqual(query["row_count"], 2)
-        self.assertIn("SELECT customer_id, full_name FROM customers", query["sql"])
-
-    def test_build_final_query_entry_includes_generate_safe_sql(self):
-        entry = build_final_query_entry(
-            "generate_safe_sql",
-            {"user_question": "List customers"},
-            MCP_RESULT,
-        )
-
-        self.assertIsNotNone(entry)
-        self.assertEqual(entry["tool"], "generate_safe_sql")
-        self.assertEqual(
-            entry["sql"],
-            "SELECT customer_id, full_name FROM customers LIMIT 5",
-        )
-        self.assertEqual(entry["row_count"], 2)
-
     def test_predefined_traced_result_behavior_unchanged(self):
         traced = make_trace(
             "SELECT customer_id FROM customers LIMIT 100",

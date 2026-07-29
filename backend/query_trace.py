@@ -226,11 +226,7 @@ def extract_final_rows(tool_name: str, result) -> list[dict]:
     if isinstance(result, dict) and (result.get("error") or result.get("success") is False):
         return []
 
-    if tool_name in {
-        "execute_safe_sql",
-        "validate_safe_sql",
-        "generate_safe_sql",
-    } and isinstance(result, dict):
+    if tool_name in {"execute_safe_sql", "validate_safe_sql"} and isinstance(result, dict):
         trace = result.get("trace")
         if isinstance(trace, dict) and trace.get("rows"):
             return trace.get("rows") or []
@@ -257,11 +253,7 @@ def extract_final_sql_and_tables(tool_name: str, result) -> tuple[str, dict[str,
     if result is None or (isinstance(result, dict) and (result.get("error") or result.get("success") is False)):
         return "", {}
 
-    if tool_name in {
-        "execute_safe_sql",
-        "validate_safe_sql",
-        "generate_safe_sql",
-    } and isinstance(result, dict):
+    if tool_name in {"execute_safe_sql", "validate_safe_sql"} and isinstance(result, dict):
         trace = result.get("trace") if isinstance(result.get("trace"), dict) else {}
         sql = (trace.get("sql") or result.get("sql") or "").strip()
         tables_used = trace.get("tables_used") or {}

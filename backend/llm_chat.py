@@ -33,7 +33,6 @@ except ImportError:  # pragma: no cover - optional until MCP package is deployed
     def call_mcp_tool(tool_name: str, arguments: dict | None = None) -> dict:
         return {"success": False, "error": "MCP is not available."}
 
-from sql_generation import SqlGenerationError, generate_sql_with_claude
 from tools import (
     ALLOWED_TOOL_NAMES,
     BANNED_TOOL_NAMES,
@@ -68,22 +67,19 @@ MCP_TOOL_NAMES = frozenset({
     "execute_safe_sql",
 })
 
-ORCHESTRATION_TOOL_NAMES = frozenset({
-    "generate_safe_sql",
-})
-
 SYSTEM_PROMPT = """You are TellerIQ, a professional pawnshop and banking operations assistant.
 
 Rules:
 - Answer only using data returned by your tools. Never invent balances, dates, names, or loan details.
 - Prefer predefined lookup tools for standard portfolio and customer questions.
 - When a customer is referenced by partial name or pronoun, resolve them with search_customers or a customer-specific tool using customer_name before answering.
-- For flexible or ad-hoc database questions that no predefined tool answers, call generate_safe_sql with the user's natural-language question.
-- Do not write, invent, or submit SQL yourself. Never call validate_safe_sql or execute_safe_sql.
-- generate_safe_sql generates, validates, and executes read-only SQL; summarize its returned rows in plain language.
-- If generate_safe_sql fails, explain the limitation briefly or ask a clarifying question; do not invent substitute results.
+- Use validate_safe_sql and execute_safe_sql only when no predefined tool directly answers the question.
+- execute_safe_sql accepts read-only SELECT statements against the approved schema only.
+- Before writing SQL, use the approved schema reference below and prefer validate_safe_sql when column names are uncertain.
+- If validation or execution reports unknown tables or columns, read the error, consult the schema, correct the SQL, and retry within the available tool rounds.
+- Do not expose raw internal error text to the user; summarize the outcome in plain language after recovery attempts.
 - If multiple customers match a name, ask the user to clarify with the specific names returned.
-- For genuinely ambiguous database requests, ask a focused clarifying question instead of listing generic capabilities.
+- For genuinely ambiguous requests, ask a focused clarifying question instead of listing generic capabilities.
 - For general knowledge questions that do not require database records, answer directly without calling tools.
 - Be concise and professional. Use short paragraphs or bullet lists when helpful.
 - Format dollar amounts as $X,XXX.XX and dates in readable form (e.g., June 5, 2026).
@@ -119,27 +115,41 @@ def _gemini_function_declarations() -> list[dict]:
     return declarations
 
 
-def _orchestration_function_declarations() -> list[dict]:
-    """Gemini-visible SQL orchestration tools (not MCP server tools)."""
+def _mcp_function_declarations() -> list[dict]:
     return [
         {
-            "name": "generate_safe_sql",
+            "name": "validate_safe_sql",
             "description": (
-                "Answer a flexible database question by generating read-only "
-                "SQL with Claude, then validating and executing it safely. "
-                "Pass the user's natural-language question. Do not pass SQL."
+                "Validate a single read-only SELECT statement against "
+                "the approved pawnshop database schema."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "user_question": {
+                    "sql": {
                         "type": "string",
-                        "description": (
-                            "The natural-language database question to answer."
-                        ),
+                        "description": "The read-only SELECT statement to validate.",
                     }
                 },
-                "required": ["user_question"],
+                "required": ["sql"],
+            },
+        },
+        {
+            "name": "execute_safe_sql",
+            "description": (
+                "Validate and execute a single read-only SELECT statement "
+                "against the approved pawnshop database schema. Use this only "
+                "when no existing predefined tool directly answers the question."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sql": {
+                        "type": "string",
+                        "description": "The read-only SELECT statement to execute.",
+                    }
+                },
+                "required": ["sql"],
             },
         },
     ]
@@ -186,9 +196,7 @@ def _gemini_system_instruction(classification: IntentClassification) -> str:
 
 
 def _gemini_generate_config(classification: IntentClassification) -> types.GenerateContentConfig:
-    declarations = (
-        _gemini_function_declarations() + _orchestration_function_declarations()
-    )
+    declarations = _gemini_function_declarations() + _mcp_function_declarations()
     return types.GenerateContentConfig(
         system_instruction=_gemini_system_instruction(classification),
         tools=[types.Tool(function_declarations=declarations)],
@@ -258,63 +266,7 @@ def _call_mcp_tool_safe(tool_name: str, tool_args: dict) -> dict:
         return {"success": False, "error": "MCP tool execution failed."}
 
 
-def _execute_generate_safe_sql(tool_args: dict) -> dict:
-    """Claude NL→SQL, then MCP validate, then MCP execute."""
-    raw_question = tool_args.get("user_question") if isinstance(tool_args, dict) else None
-    if not isinstance(raw_question, str) or not raw_question.strip():
-        return {
-            "success": False,
-            "error": "user_question is required and must be a non-empty string.",
-        }
-
-    user_question = raw_question.strip()
-    try:
-        generated_sql = generate_sql_with_claude(user_question)
-    except SqlGenerationError as exc:
-        return {"success": False, "error": str(exc)}
-    except Exception:
-        logger.exception("Unexpected SQL generation failure")
-        return {"success": False, "error": "SQL generation failed."}
-
-    if not isinstance(generated_sql, str) or not generated_sql.strip():
-        return {"success": False, "error": "SQL generation returned an empty query."}
-
-    validation = _call_mcp_tool_safe(
-        "validate_safe_sql",
-        {"sql": generated_sql},
-    )
-    if not isinstance(validation, dict):
-        return {
-            "success": False,
-            "error": "SQL validation returned an unexpected response.",
-        }
-    if validation.get("success") is False and "valid" not in validation:
-        return validation
-    if validation.get("valid") is not True:
-        return {
-            "success": False,
-            "sql": None,
-            "rows": [],
-            "row_count": 0,
-            "validation": validation,
-            "error": validation.get("reason") or "SQL validation failed.",
-        }
-
-    execution = _call_mcp_tool_safe(
-        "execute_safe_sql",
-        {"sql": generated_sql},
-    )
-    if not isinstance(execution, dict):
-        return {
-            "success": False,
-            "error": "SQL execution returned an unexpected response.",
-        }
-    return execution
-
-
 def _execute_tool_call(tool_name: str, tool_args: dict):
-    if tool_name in ORCHESTRATION_TOOL_NAMES:
-        return _execute_generate_safe_sql(tool_args or {})
     if tool_name in MCP_TOOL_NAMES:
         return _call_mcp_tool_safe(tool_name, tool_args)
     return execute_tool(tool_name, tool_args)
@@ -548,9 +500,7 @@ def _validate_tool_call(tool_name: str) -> str | None:
     normalized = (tool_name or "").strip().lower()
     if normalized in BANNED_TOOL_NAMES:
         return f"Invalid tool name: {tool_name}"
-    # Raw MCP SQL tools remain callable internally by orchestration, but are
-    # not accepted as Gemini-authored tool calls.
-    allowed_names = set(ALLOWED_TOOL_NAMES) | ORCHESTRATION_TOOL_NAMES
+    allowed_names = set(ALLOWED_TOOL_NAMES) | MCP_TOOL_NAMES
     if normalized not in allowed_names:
         return f"Unknown tool: {tool_name}"
     return None
