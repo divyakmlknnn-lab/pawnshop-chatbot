@@ -48,7 +48,7 @@ class ChatRoutingTests(unittest.TestCase):
             mock_gemini.return_value = {
                 "reply": "<p>ok</p>",
                 "format": "html",
-                "history_text": "Answered with Gemini using conversation context.",
+                "history_text": "ok",
                 "tools_used": [],
             }
             for message in (
@@ -71,7 +71,7 @@ class ChatRoutingTests(unittest.TestCase):
         mock_gemini.return_value = {
             "reply": "<p>ok</p>",
             "format": "html",
-            "history_text": "Answered with Gemini using conversation context.",
+            "history_text": "ok",
             "tools_used": [],
         }
 
@@ -230,14 +230,207 @@ class ChatRoutingTests(unittest.TestCase):
         self.assertIn("get_overdue_customers", tool_names)
         self.assertIn("Asha Patel", result["reply"])
 
-    def test_general_knowledge_question_can_answer_without_tools(self):
+    def test_overdue_ranking_guidance_is_in_system_prompt_and_tool_descriptions(self):
+        self.assertIn("who owes the most", llm_chat.SYSTEM_PROMPT)
+        self.assertIn("highest overdue amount", llm_chat.SYSTEM_PROMPT)
+        self.assertIn("highest total overdue amount", llm_chat.SYSTEM_PROMPT)
+        self.assertIn("total owed per customer", llm_chat.SYSTEM_PROMPT)
+        self.assertIn("ranked overdue balances", llm_chat.SYSTEM_PROMPT)
+        self.assertIn("top overdue customer", llm_chat.SYSTEM_PROMPT)
+        self.assertIn("execute_safe_sql", llm_chat.SYSTEM_PROMPT)
+        self.assertIn("SUM", llm_chat.SYSTEM_PROMPT)
+        self.assertIn("GROUP BY", llm_chat.SYSTEM_PROMPT)
+        self.assertIn("get_overdue_customers", llm_chat.SYSTEM_PROMPT)
+
+        declarations = {
+            item["name"]: item["description"]
+            for item in llm_chat._gemini_function_declarations()
+        }
+        mcp_declarations = {
+            item["name"]: item["description"]
+            for item in llm_chat._mcp_function_declarations()
+        }
+
+        overdue_description = declarations["get_overdue_customers"]
+        self.assertIn("row-level", overdue_description.lower())
+        self.assertIn("ordinary overdue", overdue_description.lower())
+        self.assertIn("who owes the most", overdue_description.lower())
+        self.assertIn("execute_safe_sql", overdue_description)
+
+        total_description = declarations["get_total_overdue_amount"]
+        self.assertIn("portfolio-wide", total_description.lower())
+        self.assertIn("does not rank", total_description.lower())
+
+        execute_description = mcp_declarations["execute_safe_sql"]
+        self.assertIn("aggregate", execute_description.lower())
+        self.assertIn("ranking", execute_description.lower())
+
+    @patch("llm_chat._execute_tool_call")
+    def test_which_one_owes_the_most_uses_execute_safe_sql(self, mock_execute_tool):
+        mock_execute_tool.return_value = {
+            "success": True,
+            "rows": [{"full_name": "Asha Patel", "total_owed": 2400.0}],
+            "row_count": 1,
+        }
+        ranking_sql = (
+            "SELECT c.full_name, SUM(p.amount_due - p.amount_paid) AS total_owed "
+            "FROM customers c "
+            "JOIN loans l ON c.customer_id = l.customer_id "
+            "JOIN payments p ON l.loan_id = p.loan_id "
+            "GROUP BY c.customer_id, c.full_name "
+            "ORDER BY total_owed DESC "
+            "LIMIT 1"
+        )
         responses = [
             _make_gemini_response(
-                text=(
-                    "LTV means loan-to-value ratio: the loan balance divided by "
-                    "collateral value, expressed as a percentage."
-                )
+                function_calls=[
+                    _make_function_call("execute_safe_sql", {"sql": ranking_sql})
+                ]
             ),
+            _make_gemini_response(
+                text="Asha Patel owes the most, with $2,400.00 overdue."
+            ),
+        ]
+
+        with _patch_gemini_responses(responses):
+            result = llm_chat.chat(
+                "Which one owes the most?",
+                history=[
+                    {"role": "user", "content": "Show overdue customers"},
+                    {
+                        "role": "assistant",
+                        "content": "There are overdue accounts requiring follow-up.",
+                    },
+                ],
+            )
+
+        tool_names = [entry["tool"] for entry in result.get("tools_used", [])]
+        self.assertIn("execute_safe_sql", tool_names)
+        self.assertNotIn("get_overdue_customers", tool_names)
+        self.assertIn("Asha Patel", result["reply"])
+
+        classification = classify_intent("Which one owes the most?")
+        instruction = llm_chat._gemini_system_instruction(classification)
+        self.assertIn("who owes the most", instruction)
+
+    @patch("llm_chat._execute_tool_call")
+    def test_highest_total_overdue_amount_uses_execute_safe_sql(self, mock_execute_tool):
+        mock_execute_tool.return_value = {
+            "success": True,
+            "rows": [{"full_name": "Priya Nair", "total_owed": 3100.0}],
+            "row_count": 1,
+        }
+        responses = [
+            _make_gemini_response(
+                function_calls=[
+                    _make_function_call(
+                        "execute_safe_sql",
+                        {
+                            "sql": (
+                                "SELECT c.full_name, "
+                                "SUM(p.amount_due - p.amount_paid) AS total_owed "
+                                "FROM customers c "
+                                "JOIN loans l ON c.customer_id = l.customer_id "
+                                "JOIN payments p ON l.loan_id = p.loan_id "
+                                "GROUP BY c.customer_id, c.full_name "
+                                "ORDER BY total_owed DESC LIMIT 1"
+                            )
+                        },
+                    )
+                ]
+            ),
+            _make_gemini_response(
+                text="Priya Nair has the highest total overdue amount at $3,100.00."
+            ),
+        ]
+
+        with _patch_gemini_responses(responses):
+            result = llm_chat.chat("Who has the highest total overdue amount?")
+
+        tool_names = [entry["tool"] for entry in result.get("tools_used", [])]
+        self.assertIn("execute_safe_sql", tool_names)
+        self.assertNotIn("get_overdue_customers", tool_names)
+        self.assertNotIn("get_total_overdue_amount", tool_names)
+
+    @patch("llm_chat._execute_tool_call")
+    def test_rank_customers_by_total_overdue_uses_execute_safe_sql(
+        self,
+        mock_execute_tool,
+    ):
+        mock_execute_tool.return_value = {
+            "success": True,
+            "rows": [
+                {"full_name": "Asha Patel", "total_owed": 2400.0},
+                {"full_name": "Priya Nair", "total_owed": 1800.0},
+            ],
+            "row_count": 2,
+        }
+        responses = [
+            _make_gemini_response(
+                function_calls=[
+                    _make_function_call(
+                        "execute_safe_sql",
+                        {
+                            "sql": (
+                                "SELECT c.full_name, "
+                                "SUM(p.amount_due - p.amount_paid) AS total_owed "
+                                "FROM customers c "
+                                "JOIN loans l ON c.customer_id = l.customer_id "
+                                "JOIN payments p ON l.loan_id = p.loan_id "
+                                "GROUP BY c.customer_id, c.full_name "
+                                "ORDER BY total_owed DESC LIMIT 10"
+                            )
+                        },
+                    )
+                ]
+            ),
+            _make_gemini_response(
+                text="Ranked by total overdue: Asha Patel, then Priya Nair."
+            ),
+        ]
+
+        with _patch_gemini_responses(responses):
+            result = llm_chat.chat("Rank customers by total overdue balance")
+
+        tool_names = [entry["tool"] for entry in result.get("tools_used", [])]
+        self.assertIn("execute_safe_sql", tool_names)
+        self.assertNotIn("get_overdue_customers", tool_names)
+
+    @patch("llm_chat._execute_tool_call")
+    def test_portfolio_total_overdue_may_use_get_total_overdue_amount(
+        self,
+        mock_execute_tool,
+    ):
+        mock_execute_tool.return_value = {
+            "total_overdue": 5200.0,
+            "overdue_customer_count": 3,
+        }
+        responses = [
+            _make_gemini_response(
+                function_calls=[
+                    _make_function_call("get_total_overdue_amount", {})
+                ]
+            ),
+            _make_gemini_response(
+                text="$5,200.00 is overdue across 3 customers."
+            ),
+        ]
+
+        with _patch_gemini_responses(responses):
+            result = llm_chat.chat("How much is overdue in total?")
+
+        tool_names = [entry["tool"] for entry in result.get("tools_used", [])]
+        self.assertIn("get_total_overdue_amount", tool_names)
+        self.assertNotIn("get_overdue_customers", tool_names)
+        self.assertIn("$5,200.00", result["reply"])
+
+    def test_general_knowledge_question_can_answer_without_tools(self):
+        reply_text = (
+            "LTV means loan-to-value ratio: the loan balance divided by "
+            "collateral value, expressed as a percentage."
+        )
+        responses = [
+            _make_gemini_response(text=reply_text),
         ]
 
         with _patch_gemini_responses(responses):
@@ -245,6 +438,25 @@ class ChatRoutingTests(unittest.TestCase):
 
         self.assertEqual(result.get("tools_used"), [])
         self.assertIn("loan-to-value", result["reply"].lower())
+        self.assertEqual(result.get("history_text"), reply_text)
+        self.assertIn("<", result["reply"])
+        self.assertNotEqual(result["reply"], result["history_text"])
+
+    def test_gemini_final_response_stores_plain_text_in_history_text(self):
+        reply_text = "Priya Nair has one active personal loan."
+        responses = [_make_gemini_response(text=reply_text)]
+
+        with _patch_gemini_responses(responses):
+            result = llm_chat.chat("Tell me about Priya Nair")
+
+        self.assertEqual(result["history_text"], reply_text)
+        self.assertEqual(result.get("format"), "html")
+        self.assertIn("Priya Nair", result["reply"])
+        self.assertIn("<", result["reply"])
+        self.assertNotIn(
+            "Answered with Gemini using conversation context.",
+            result["history_text"],
+        )
 
     def test_ambiguous_customer_request_returns_clarification(self):
         responses = [

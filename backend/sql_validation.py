@@ -9,6 +9,16 @@ from schema_metadata import get_approved_schema
 
 MAX_ROW_LIMIT = 100
 
+ALLOWED_AGGREGATES: frozenset[str] = frozenset(
+    {
+        "sum",
+        "count",
+        "avg",
+        "min",
+        "max",
+    }
+)
+
 FORBIDDEN_KEYWORDS: frozenset[str] = frozenset(
     {
         "INSERT",
@@ -276,6 +286,41 @@ def _extract_alias(select_item: str) -> tuple[str, str | None]:
     return select_item.strip(), None
 
 
+def _strip_column_qualifiers(expression: str) -> str:
+    """Remove optional table/alias prefixes from column references."""
+    return re.sub(rf"{_IDENTIFIER}\.{_IDENTIFIER}", r"\2", expression)
+
+
+def _match_aggregate(expression: str) -> tuple[str, str] | None:
+    """Return (function_name, inner_expression) for a single top-level aggregate call."""
+    match = re.match(
+        r"^(sum|count|avg|min|max)\s*\(",
+        expression.strip(),
+        re.IGNORECASE,
+    )
+    if match is None:
+        return None
+
+    start = match.end()
+    depth = 1
+    index = start
+    while index < len(expression):
+        char = expression[index]
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                inner = expression[start:index].strip()
+                if expression[index + 1 :].strip():
+                    return None
+                if not inner:
+                    return None
+                return match.group(1).lower(), inner
+        index += 1
+    return None
+
+
 def _allowed_columns_for_table(table_name: str) -> frozenset[str]:
     allowed = set(_TABLE_FIELDS[table_name])
     allowed.update(_COMPUTED_FIELDS_BY_TABLE.get(table_name, {}))
@@ -291,22 +336,60 @@ def _column_owner_tables(column_name: str, table_names: set[str]) -> set[str]:
     return owners
 
 
-def _validate_select_item(
-    select_item: str,
+def _matching_computed_field(expression: str) -> str | None:
+    normalized_expression = _normalize_expression(expression)
+    stripped_expression = _normalize_expression(_strip_column_qualifiers(expression))
+    for computed_name, approved_expression in _COMPUTED_EXPRESSIONS.items():
+        if (
+            normalized_expression == approved_expression
+            or stripped_expression == approved_expression
+        ):
+            return computed_name
+    return None
+
+
+def _validate_qualified_column_refs(
+    expression: str,
     table_names: set[str],
     alias_map: dict[str, str],
     columns_used: set[str],
 ) -> str | None:
-    expression, alias = _extract_alias(select_item)
-    normalized_expression = _normalize_expression(expression)
+    for match in _QUALIFIED_COLUMN.finditer(expression):
+        table_ref = match.group(1).lower()
+        column_name = match.group(2).lower()
+        resolved_table = _resolve_table_name(table_ref, alias_map, table_names)
+        if resolved_table is None:
+            return f"Unknown table reference: {table_ref}"
+        if column_name not in _TABLE_FIELDS[resolved_table]:
+            return f"Unknown column: {resolved_table}.{column_name}"
+        columns_used.add(column_name)
+    return None
 
-    for computed_name, approved_expression in _COMPUTED_EXPRESSIONS.items():
-        if normalized_expression == approved_expression:
-            columns_used.add(computed_name)
-            _collect_physical_columns_from_expression(expression, table_names, alias_map, columns_used)
-            if alias:
-                columns_used.add(alias)
-            return None
+
+def _validate_base_select_expression(
+    expression: str,
+    table_names: set[str],
+    alias_map: dict[str, str],
+    columns_used: set[str],
+) -> str | None:
+    computed_name = _matching_computed_field(expression)
+    if computed_name is not None:
+        qualified_error = _validate_qualified_column_refs(
+            expression,
+            table_names,
+            alias_map,
+            columns_used,
+        )
+        if qualified_error:
+            return qualified_error
+        columns_used.add(computed_name)
+        _collect_physical_columns_from_expression(
+            expression,
+            table_names,
+            alias_map,
+            columns_used,
+        )
+        return None
 
     if re.fullmatch(_IDENTIFIER, expression, re.IGNORECASE):
         column_name = expression.lower()
@@ -317,8 +400,6 @@ def _validate_select_item(
             if column_name not in _COMPUTED_FIELDS_BY_TABLE.get(only_table, {}):
                 return f"Computed field '{column_name}' is not allowed for table '{only_table}'."
             columns_used.add(column_name)
-            if alias:
-                columns_used.add(alias)
             return None
 
         owners = _column_owner_tables(column_name, table_names)
@@ -327,8 +408,6 @@ def _validate_select_item(
         if len(owners) > 1:
             return f"Ambiguous column reference: {column_name}"
         columns_used.add(column_name)
-        if alias:
-            columns_used.add(alias)
         return None
 
     if _QUALIFIED_COLUMN.fullmatch(expression):
@@ -340,17 +419,61 @@ def _validate_select_item(
             return f"Unknown table reference: {table_ref}"
         if column_name in _COMPUTED_FIELDS_BY_TABLE.get(resolved_table, {}):
             columns_used.add(column_name)
-            if alias:
-                columns_used.add(alias)
             return None
         if column_name not in _TABLE_FIELDS[resolved_table]:
             return f"Unknown column: {resolved_table}.{column_name}"
         columns_used.add(column_name)
-        if alias:
-            columns_used.add(alias)
         return None
 
     return "Only explicit approved columns or computed fields are allowed in SELECT."
+
+
+def _validate_select_expression(
+    expression: str,
+    table_names: set[str],
+    alias_map: dict[str, str],
+    columns_used: set[str],
+) -> str | None:
+    aggregate = _match_aggregate(expression)
+    if aggregate is not None:
+        function_name, inner_expression = aggregate
+        if function_name not in ALLOWED_AGGREGATES:
+            return "Only explicit approved columns or computed fields are allowed in SELECT."
+        return _validate_base_select_expression(
+            inner_expression,
+            table_names,
+            alias_map,
+            columns_used,
+        )
+
+    return _validate_base_select_expression(
+        expression,
+        table_names,
+        alias_map,
+        columns_used,
+    )
+
+
+def _validate_select_item(
+    select_item: str,
+    table_names: set[str],
+    alias_map: dict[str, str],
+    columns_used: set[str],
+    select_aliases: set[str],
+) -> str | None:
+    expression, alias = _extract_alias(select_item)
+    error = _validate_select_expression(
+        expression,
+        table_names,
+        alias_map,
+        columns_used,
+    )
+    if error:
+        return error
+    if alias:
+        columns_used.add(alias)
+        select_aliases.add(alias)
+    return None
 
 
 def _collect_physical_columns_from_expression(
@@ -404,7 +527,9 @@ def _validate_clause_columns(
     table_names: set[str],
     alias_map: dict[str, str],
     columns_used: set[str],
+    select_aliases: set[str] | None = None,
 ) -> str | None:
+    select_aliases = select_aliases or set()
     for match in _QUALIFIED_COLUMN.finditer(clause):
         table_ref = match.group(1).lower()
         column_name = match.group(2).lower()
@@ -419,6 +544,8 @@ def _validate_clause_columns(
         only_table = next(iter(table_names))
         for match in _BARE_IDENTIFIER.finditer(clause):
             token = match.group(1).lower()
+            if token in select_aliases:
+                continue
             if token in _TABLE_FIELDS[only_table]:
                 columns_used.add(token)
             elif token in _COMPUTED_EXPRESSIONS:
@@ -546,6 +673,7 @@ def validate_readonly_sql(sql: str, *, allow_contact_fields: bool = False) -> di
     tables_used: set[str] = set()
     alias_map: dict[str, str] = {}
     columns_used: set[str] = set()
+    select_aliases: set[str] = set()
 
     base_schema, base_table, base_alias = _parse_table_reference(
         from_match.group("schema"),
@@ -631,7 +759,13 @@ def validate_readonly_sql(sql: str, *, allow_contact_fields: bool = False) -> di
         columns_used.update({left_column, right_column})
 
     for select_item in _split_select_list(select_clause):
-        error = _validate_select_item(select_item, tables_used, alias_map, columns_used)
+        error = _validate_select_item(
+            select_item,
+            tables_used,
+            alias_map,
+            columns_used,
+            select_aliases,
+        )
         if error:
             return _validation_result(
                 valid=False,
@@ -655,6 +789,7 @@ def validate_readonly_sql(sql: str, *, allow_contact_fields: bool = False) -> di
                     tables_used,
                     alias_map,
                     columns_used,
+                    select_aliases,
                 )
                 if error:
                     return _validation_result(

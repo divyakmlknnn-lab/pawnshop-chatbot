@@ -110,7 +110,14 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "get_overdue_customers",
-            "description": "List all customers with overdue unpaid payments.",
+            "description": (
+                "Return a row-level list of overdue unpaid payments/customers, "
+                "ordered by due date. Use for ordinary overdue list requests "
+                "(for example, 'show overdue customers' or 'who is overdue'). "
+                "Do NOT use for highest overdue amount, who owes the most, "
+                "per-customer totals, or ranked overdue balances—use "
+                "execute_safe_sql with aggregate SQL instead."
+            ),
             "parameters": {"type": "object", "properties": {}},
         },
     },
@@ -232,7 +239,11 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "get_total_overdue_amount",
-            "description": "Return the total overdue payment amount and count of overdue customers.",
+            "description": (
+                "Return the portfolio-wide total overdue payment amount and "
+                "count of overdue customers. Does not rank customers or return "
+                "per-customer totals."
+            ),
             "parameters": {"type": "object", "properties": {}},
         },
     },

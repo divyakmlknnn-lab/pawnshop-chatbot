@@ -14,7 +14,7 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 
-from database import verify_schema
+from database import get_dashboard_stats, verify_schema
 from llm_chat import chat
 
 app = Flask(__name__)
@@ -42,6 +42,14 @@ def health():
         return jsonify({"status": "ok", "database": "telleriq_db schema valid"})
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 503
+
+
+@app.route("/dashboard/stats", methods=["GET"])
+def dashboard_stats_endpoint():
+    try:
+        return jsonify(get_dashboard_stats())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/chat", methods=["POST"])

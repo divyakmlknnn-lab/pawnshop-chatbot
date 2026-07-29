@@ -51,6 +51,68 @@ class SqlValidationValidTests(unittest.TestCase):
         self.assertTrue(result["valid"])
         self.assertIn("ltv_percent", result["columns_used"])
 
+    def test_qualified_computed_field_expression(self):
+        sql = (
+            "SELECT p.amount_due - p.amount_paid AS remaining_due "
+            "FROM payments p LIMIT 10"
+        )
+        result = validate_readonly_sql(sql)
+        self.assertTrue(result["valid"])
+        self.assertIn("remaining_due", result["columns_used"])
+        self.assertIn("amount_due", result["columns_used"])
+        self.assertIn("amount_paid", result["columns_used"])
+
+    def test_sum_approved_column(self):
+        sql = "SELECT SUM(current_balance) AS total_balance FROM loans"
+        result = validate_readonly_sql(sql)
+        self.assertTrue(result["valid"])
+        self.assertIn("current_balance", result["columns_used"])
+        self.assertIn("total_balance", result["columns_used"])
+        self.assertTrue(result["normalized_sql"].upper().endswith("LIMIT 100"))
+
+    def test_sum_approved_computed_expression(self):
+        sql = (
+            "SELECT SUM(amount_due - amount_paid) AS total_overdue "
+            "FROM payments LIMIT 1"
+        )
+        result = validate_readonly_sql(sql)
+        self.assertTrue(result["valid"])
+        self.assertEqual(
+            result["normalized_sql"],
+            "SELECT SUM(amount_due - amount_paid) AS total_overdue FROM payments LIMIT 1",
+        )
+        self.assertIn("remaining_due", result["columns_used"])
+        self.assertIn("total_overdue", result["columns_used"])
+
+    def test_sum_qualified_computed_expression_with_group_and_order(self):
+        sql = (
+            "SELECT c.full_name, SUM(p.amount_due - p.amount_paid) AS total_owed "
+            "FROM customers c "
+            "JOIN loans l ON c.customer_id = l.customer_id "
+            "JOIN payments p ON l.loan_id = p.loan_id "
+            "GROUP BY c.customer_id, c.full_name "
+            "ORDER BY total_owed DESC "
+            "LIMIT 1"
+        )
+        result = validate_readonly_sql(sql)
+        self.assertTrue(result["valid"])
+        self.assertEqual(result["tables_used"], ["customers", "loans", "payments"])
+        self.assertIn("total_owed", result["columns_used"])
+        self.assertIn("remaining_due", result["columns_used"])
+        self.assertTrue(result["normalized_sql"].upper().endswith("LIMIT 1"))
+
+    def test_order_by_aggregate_alias_single_table(self):
+        sql = (
+            "SELECT customer_id, SUM(current_balance) AS total_balance "
+            "FROM loans "
+            "GROUP BY customer_id "
+            "ORDER BY total_balance DESC "
+            "LIMIT 1"
+        )
+        result = validate_readonly_sql(sql)
+        self.assertTrue(result["valid"])
+        self.assertIn("total_balance", result["columns_used"])
+
     def test_limit_preservation(self):
         sql = "SELECT loan_id FROM loans LIMIT 100"
         result = validate_readonly_sql(sql)
@@ -160,6 +222,44 @@ class SqlValidationInvalidTests(unittest.TestCase):
         result = validate_readonly_sql("LOAD DATA INFILE '/tmp/x' INTO TABLE customers")
         self.assertFalse(result["valid"])
         self.assertIn("LOAD DATA", result["reason"])
+
+    def test_unsafe_function_rejected(self):
+        result = validate_readonly_sql("SELECT SLEEP(1) FROM customers")
+        self.assertFalse(result["valid"])
+        self.assertIn(
+            "Only explicit approved columns or computed fields are allowed in SELECT.",
+            result["reason"],
+        )
+
+    def test_arbitrary_arithmetic_rejected(self):
+        result = validate_readonly_sql(
+            "SELECT amount_due + amount_paid AS total FROM payments"
+        )
+        self.assertFalse(result["valid"])
+        self.assertIn(
+            "Only explicit approved columns or computed fields are allowed in SELECT.",
+            result["reason"],
+        )
+
+    def test_sum_of_arbitrary_arithmetic_rejected(self):
+        result = validate_readonly_sql(
+            "SELECT SUM(amount_due + amount_paid) AS total FROM payments"
+        )
+        self.assertFalse(result["valid"])
+        self.assertIn(
+            "Only explicit approved columns or computed fields are allowed in SELECT.",
+            result["reason"],
+        )
+
+    def test_nested_aggregate_rejected(self):
+        result = validate_readonly_sql(
+            "SELECT SUM(SUM(current_balance)) AS total FROM loans"
+        )
+        self.assertFalse(result["valid"])
+        self.assertIn(
+            "Only explicit approved columns or computed fields are allowed in SELECT.",
+            result["reason"],
+        )
 
 
 class SqlValidationSecurityFixTests(unittest.TestCase):

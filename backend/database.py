@@ -502,6 +502,18 @@ def get_today_priorities():
     }
 
 
+def get_dashboard_stats():
+    """Return portfolio counts for the operations dashboard (no LLM)."""
+    customer_rows = extract_rows(get_customer_count())
+    total_customers = int(customer_rows[0].get("count") or 0) if customer_rows else 0
+    return {
+        "total_customers": total_customers,
+        "overdue_payments": get_overdue_account_count(),
+        "high_risk_loans": len(extract_rows(get_high_risk_loans())),
+        "collateral_at_risk": len(extract_rows(get_collateral_at_risk())),
+    }
+
+
 REQUIRED_SCHEMA = {
     "customers": ["customer_id", "full_name", "phone", "email"],
     "accounts": ["customer_id", "account_type", "balance", "status"],

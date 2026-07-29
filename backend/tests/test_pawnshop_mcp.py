@@ -75,6 +75,28 @@ class PawnshopMcpServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["tables_used"], ["customers"])
         self.assertEqual(payload["columns_used"], ["customer_id"])
 
+    async def test_validate_safe_sql_accepts_sum_aggregate(self):
+        result = await mcp.call_tool(
+            "validate_safe_sql",
+            {
+                "sql": (
+                    "SELECT c.full_name, SUM(p.amount_due - p.amount_paid) AS total_owed "
+                    "FROM customers c "
+                    "JOIN loans l ON c.customer_id = l.customer_id "
+                    "JOIN payments p ON l.loan_id = p.loan_id "
+                    "GROUP BY c.customer_id, c.full_name "
+                    "ORDER BY total_owed DESC "
+                    "LIMIT 1"
+                )
+            },
+        )
+
+        payload = json.loads(result[0].text)
+
+        self.assertTrue(payload["valid"])
+        self.assertIn("total_owed", payload["columns_used"])
+        self.assertTrue(payload["normalized_sql"].upper().endswith("LIMIT 1"))
+
     async def test_validate_safe_sql_rejects_delete(self):
         result = await mcp.call_tool(
             "validate_safe_sql",
