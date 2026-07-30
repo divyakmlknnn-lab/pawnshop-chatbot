@@ -45,6 +45,15 @@ class ChatRoutingTests(unittest.TestCase):
         self.assertIn("Approved joins:", instruction)
         self.assertIn("computed:", instruction)
 
+    def test_classifier_hint_omits_non_mcp_suggested_tool(self):
+        classification = classify_intent("How many missed payments are there?")
+        self.assertEqual(classification.tool, "get_missed_payments")
+        hint = llm_chat._classification_planning_hint(classification)
+        self.assertIn("intent=", hint)
+        self.assertNotIn("suggested_tool=", hint)
+        self.assertNotIn("get_missed_payments", hint)
+        self.assertIn("Ignore any suggested_tool", llm_chat.SYSTEM_PROMPT)
+
     def test_gemini_registers_only_mcp_tools(self):
         self.assertEqual(llm_chat._gemini_function_declarations(), [])
         mcp_names = [item["name"] for item in llm_chat._mcp_function_declarations()]
@@ -290,9 +299,14 @@ class ChatRoutingTests(unittest.TestCase):
         self.assertIn("get_approved_schema", llm_chat.SYSTEM_PROMPT)
         self.assertIn("validate_safe_sql", llm_chat.SYSTEM_PROMPT)
         self.assertIn("Do not use predefined banking lookup tools", llm_chat.SYSTEM_PROMPT)
-        self.assertIn("who owes the most", llm_chat.SYSTEM_PROMPT)
+        self.assertIn("how many", llm_chat.SYSTEM_PROMPT)
+        self.assertIn("COUNT", llm_chat.SYSTEM_PROMPT)
         self.assertIn("SUM", llm_chat.SYSTEM_PROMPT)
+        self.assertIn("AVG", llm_chat.SYSTEM_PROMPT)
+        self.assertIn("MAX", llm_chat.SYSTEM_PROMPT)
+        self.assertIn("MIN", llm_chat.SYSTEM_PROMPT)
         self.assertIn("GROUP BY", llm_chat.SYSTEM_PROMPT)
+        self.assertIn("ORDER BY", llm_chat.SYSTEM_PROMPT)
         self.assertNotIn("get_overdue_customers", llm_chat.SYSTEM_PROMPT)
 
         mcp_declarations = {
@@ -300,7 +314,75 @@ class ChatRoutingTests(unittest.TestCase):
             for item in llm_chat._mcp_function_declarations()
         }
         self.assertIn("schema", mcp_declarations["get_approved_schema"].lower())
-        self.assertIn("aggregate", mcp_declarations["execute_safe_sql"].lower())
+        execute_desc = mcp_declarations["execute_safe_sql"]
+        self.assertIn("COUNT", execute_desc)
+        self.assertIn("SUM", execute_desc)
+        self.assertIn("AVG", execute_desc)
+        self.assertIn("MAX", execute_desc)
+        self.assertIn("MIN", execute_desc)
+        self.assertIn("GROUP BY", execute_desc)
+        self.assertIn("ORDER BY", execute_desc)
+        self.assertIn("how many", execute_desc.lower())
+
+    @patch("llm_chat._execute_tool_call")
+    def test_how_many_missed_payments_uses_execute_safe_sql(self, mock_execute_tool):
+        mock_execute_tool.return_value = {
+            "success": True,
+            "rows": [{"missed_payment_count": 12}],
+            "row_count": 1,
+        }
+        count_sql = (
+            "SELECT COUNT(*) AS missed_payment_count "
+            "FROM payments "
+            "WHERE due_date < CURDATE() AND amount_paid < amount_due"
+        )
+        responses = [
+            _make_gemini_response(
+                function_calls=[
+                    _make_function_call("execute_safe_sql", {"sql": count_sql})
+                ]
+            ),
+            _make_gemini_response(text="There are 12 missed payments."),
+        ]
+
+        with _patch_gemini_responses(responses):
+            result = llm_chat.chat("How many missed payments are there?")
+
+        tool_names = [entry["tool"] for entry in result.get("tools_used", [])]
+        self.assertIn("execute_safe_sql", tool_names)
+        self.assertNotIn("get_missed_payments", tool_names)
+        self.assertIn("12", result["reply"])
+        self.assertTrue(result.get("query_details", {}).get("queries"))
+
+    @patch("llm_chat._execute_tool_call")
+    def test_iphone_collateral_question_uses_execute_safe_sql(self, mock_execute_tool):
+        mock_execute_tool.return_value = {
+            "success": True,
+            "rows": [{"full_name": "Asha Patel", "item_type": "iPhone"}],
+            "row_count": 1,
+        }
+        collateral_sql = (
+            "SELECT DISTINCT c.full_name, ci.item_type "
+            "FROM customers c "
+            "JOIN loans l ON c.customer_id = l.customer_id "
+            "JOIN collateral_items ci ON l.loan_id = ci.loan_id "
+            "WHERE ci.item_type LIKE '%iPhone%'"
+        )
+        responses = [
+            _make_gemini_response(
+                function_calls=[
+                    _make_function_call("execute_safe_sql", {"sql": collateral_sql})
+                ]
+            ),
+            _make_gemini_response(text="Asha Patel has iPhone collateral."),
+        ]
+
+        with _patch_gemini_responses(responses):
+            result = llm_chat.chat("Who has iPhone as collateral?")
+
+        tool_names = [entry["tool"] for entry in result.get("tools_used", [])]
+        self.assertIn("execute_safe_sql", tool_names)
+        self.assertIn("Asha Patel", result["reply"])
 
     @patch("llm_chat._execute_tool_call")
     def test_which_one_owes_the_most_uses_execute_safe_sql(self, mock_execute_tool):
@@ -573,6 +655,18 @@ class ChatRoutingTests(unittest.TestCase):
         self.assertEqual(result.get("history_text"), reply_text)
         self.assertIn("<", result["reply"])
         self.assertNotEqual(result["reply"], result["history_text"])
+
+    def test_hello_does_not_force_sql_tools(self):
+        reply_text = "Hello! How can I help with your pawnshop portfolio today?"
+        responses = [_make_gemini_response(text=reply_text)]
+
+        with _patch_gemini_responses(responses):
+            result = llm_chat.chat("hello")
+
+        self.assertEqual(result.get("tools_used"), [])
+        self.assertEqual(result.get("history_text"), reply_text)
+        self.assertFalse(result.get("query_details", {}).get("queries"))
+        self.assertIn("hello", llm_chat.SYSTEM_PROMPT.lower())
 
     def test_gemini_final_response_stores_plain_text_in_history_text(self):
         reply_text = "Priya Nair has one active personal loan."

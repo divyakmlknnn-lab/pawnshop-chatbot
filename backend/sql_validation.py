@@ -96,7 +96,12 @@ _LIMIT_TRAILING = re.compile(
     re.IGNORECASE,
 )
 _SELECT_STAR = re.compile(r"\bSELECT\b(?P<select>.+?)\bFROM\b", re.IGNORECASE | re.DOTALL)
-_QUALIFIED_COLUMN = re.compile(rf"\b{_IDENTIFIER}\.{_IDENTIFIER}\b")
+_SELECT_MODIFIERS = re.compile(r"^\s*(?:DISTINCT|ALL)\s+", re.IGNORECASE)
+# Avoid \\b so backtick-quoted identifiers like `c`.`full_name` still match.
+_QUALIFIED_COLUMN = re.compile(
+    rf"(?<![a-zA-Z0-9_`]){_IDENTIFIER}\.{_IDENTIFIER}(?![a-zA-Z0-9_`])"
+)
+_QUALIFIED_COLUMN_EXACT = re.compile(rf"^{_IDENTIFIER}\.{_IDENTIFIER}$", re.IGNORECASE)
 _BARE_IDENTIFIER = re.compile(r"\b([a-zA-Z_][a-zA-Z0-9_]*)\b")
 
 
@@ -219,9 +224,10 @@ def _parse_table_reference(
     table: str,
     alias: str | None,
 ) -> tuple[str | None, str, str]:
-    schema_name = schema.lower() if schema else None
-    table_name = table.lower()
-    alias_name = (alias or table).lower()
+    # Named regex groups may include optional surrounding backticks from _IDENTIFIER.
+    schema_name = schema.lower().strip("`") if schema else None
+    table_name = table.lower().strip("`")
+    alias_name = (alias or table).lower().strip("`")
     return schema_name, table_name, alias_name
 
 
@@ -410,10 +416,10 @@ def _validate_base_select_expression(
         columns_used.add(column_name)
         return None
 
-    if _QUALIFIED_COLUMN.fullmatch(expression):
-        table_ref, column_name = expression.split(".", 1)
-        table_ref = table_ref.strip("`").lower()
-        column_name = column_name.strip("`").lower()
+    qualified_match = _QUALIFIED_COLUMN_EXACT.fullmatch(expression)
+    if qualified_match:
+        table_ref = qualified_match.group(1).lower()
+        column_name = qualified_match.group(2).lower()
         resolved_table = _resolve_table_name(table_ref, alias_map, table_names)
         if resolved_table is None:
             return f"Unknown table reference: {table_ref}"
@@ -658,7 +664,8 @@ def validate_readonly_sql(sql: str, *, allow_contact_fields: bool = False) -> di
     if select_match is None:
         return _validation_result(valid=False, reason="Malformed SELECT statement.")
 
-    select_clause = select_match.group("select")
+    # DISTINCT/ALL are SELECT modifiers, not part of the first projected expression.
+    select_clause = _SELECT_MODIFIERS.sub("", select_match.group("select"), count=1)
     for select_item in _split_select_list(select_clause):
         stripped_item = select_item.strip()
         if stripped_item == "*":

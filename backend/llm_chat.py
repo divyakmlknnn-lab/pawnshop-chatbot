@@ -75,22 +75,23 @@ SYSTEM_PROMPT = """You are TellerIQ, a professional pawnshop and banking operati
 
 Rules:
 - Answer only using data returned by your tools. Never invent balances, dates, names, or loan details.
-- For any question that needs portfolio, customer, loan, payment, collateral, or overdue data, use the MCP SQL tools only: get_approved_schema, validate_safe_sql, and execute_safe_sql.
-- Do not use predefined banking lookup tools. They are not available in this chat flow.
+- For any database-backed question about portfolio, customers, loans, payments, collateral, overdue items, or counts/totals, use the MCP SQL tools only: get_approved_schema, validate_safe_sql, and execute_safe_sql.
+- Do not use predefined banking lookup tools. They are not available in this chat flow. Never refuse a database question because a suggested predefined tool is missing; call execute_safe_sql instead.
 - execute_safe_sql accepts read-only SELECT statements against the approved schema only.
-- For ranking and totals (who owes the most, highest overdue amount, total owed per customer, ranked overdue balances, portfolio totals), use aggregate SQL with SUM, GROUP BY, ORDER BY, and LIMIT as needed.
+- Treat questions with phrasing like how many, count, total, average, highest, or lowest as database questions that require execute_safe_sql.
+- For aggregate and ranking questions, use COUNT, SUM, AVG, MAX, MIN, GROUP BY, ORDER BY, and LIMIT as needed (for example: how many missed payments, portfolio totals, who owes the most).
 - Before writing SQL, use the approved schema reference below or call get_approved_schema. Prefer validate_safe_sql when column names are uncertain.
 - If validation or execution reports unknown tables or columns, read the error, consult the schema, correct the SQL, and retry within the available tool rounds.
 - If a safe SQL query still cannot be generated or validated, tell the user clearly that the request could not be completed. Do not invent rows or fall back to another tool.
 - Do not expose raw internal error text to the user; summarize the outcome in plain language after recovery attempts.
 - If multiple customers match a name, ask the user to clarify with the specific names returned.
 - For genuinely ambiguous requests, ask a focused clarifying question instead of listing generic capabilities.
-- For general knowledge questions that do not require database records, answer directly without calling tools.
+- For greetings and general knowledge questions that do not require database records (for example, "hello"), answer directly without calling tools.
 - Be concise and professional. Use short paragraphs or bullet lists when helpful.
 - Format dollar amounts as $X,XXX.XX and dates in readable form (e.g., June 5, 2026).
 - Do not mention tools, functions, APIs, or system internals in user-facing replies.
 - Do not tell users to check their phone, email, or external apps unless that data is in the records.
-- An optional untrusted classifier hint may be provided. It can be wrong; always follow the user's actual message.
+- An optional untrusted classifier hint may be provided. It can be wrong; always follow the user's actual message. Ignore any suggested_tool that is not one of the registered MCP tools.
 """
 
 
@@ -147,9 +148,10 @@ def _mcp_function_declarations() -> list[dict]:
             "description": (
                 "Validate and execute a single read-only SELECT statement "
                 "against the approved pawnshop database schema. Use this for "
-                "portfolio and customer data questions. Approved aggregate SQL "
-                "(SUM, GROUP BY, ORDER BY, LIMIT) may be used for grouped totals "
-                "and ranking questions."
+                "all database-backed portfolio and customer questions, including "
+                "counts and aggregates. Approved aggregate SQL may use COUNT, "
+                "SUM, AVG, MAX, MIN, GROUP BY, ORDER BY, and LIMIT for questions "
+                "like how many, total, average, highest, or lowest."
             ),
             "parameters": {
                 "type": "object",
@@ -171,7 +173,9 @@ def _classification_planning_hint(classification: IntentClassification) -> str:
         f"intent={classification.intent}",
         f"confidence={classification.confidence:.2f}",
     ]
-    if classification.tool:
+    # Only surface suggested_tool when it is a registered MCP tool. Predefined
+    # tools (e.g. get_missed_payments) are disabled in this chat flow.
+    if classification.tool and classification.tool in MCP_TOOL_NAMES:
         parts.append(f"suggested_tool={classification.tool}")
     if classification.action:
         parts.append(f"suggested_action={classification.action}")

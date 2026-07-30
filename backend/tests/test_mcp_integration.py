@@ -68,9 +68,56 @@ class McpTraceIntegrationTests(unittest.TestCase):
             entry["sql"],
             "SELECT customer_id, full_name FROM customers LIMIT 5",
         )
-        self.assertEqual(entry["tables_used"], {"customers": []})
+        self.assertEqual(entry["tables_used"], {"customers": ["Used"]})
         self.assertEqual(len(entry["rows"]), 2)
         self.assertEqual(entry["row_count"], 2)
+
+    def test_join_query_tables_used_includes_customers_loans_payments(self):
+        join_sql = (
+            "SELECT c.full_name, l.loan_id, p.amount_due "
+            "FROM customers c "
+            "JOIN loans l ON l.customer_id = c.customer_id "
+            "JOIN payments p ON p.loan_id = l.loan_id "
+            "LIMIT 10"
+        )
+        result = {
+            "success": True,
+            "sql": join_sql,
+            "rows": [{"full_name": "Asha Patel", "loan_id": 1, "amount_due": 100.0}],
+            "row_count": 1,
+            "validation": {
+                "valid": True,
+                "normalized_sql": join_sql,
+                "reason": None,
+                "tables_used": ["customers", "loans", "payments"],
+                "columns_used": ["full_name", "loan_id", "amount_due"],
+            },
+            "trace": {
+                "tables_used": {"customers": [], "loans": [], "payments": []},
+                "sql": join_sql,
+                "rows": [{"full_name": "Asha Patel", "loan_id": 1, "amount_due": 100.0}],
+            },
+        }
+
+        entry = build_final_query_entry(
+            "execute_safe_sql",
+            {"sql": join_sql},
+            result,
+        )
+
+        self.assertIsNotNone(entry)
+        self.assertEqual(
+            set(entry["tables_used"].keys()),
+            {"customers", "loans", "payments"},
+        )
+        self.assertEqual(
+            entry["tables_used"],
+            {
+                "customers": ["Used"],
+                "loans": ["Used"],
+                "payments": ["Used"],
+            },
+        )
 
     def test_build_query_details_includes_mcp_execution(self):
         classification = classify_intent("Show customers with the highest balances")

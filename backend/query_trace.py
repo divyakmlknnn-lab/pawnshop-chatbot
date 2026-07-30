@@ -249,6 +249,33 @@ def extract_final_rows(tool_name: str, result) -> list[dict]:
     return rows if rows else []
 
 
+def _normalize_mcp_tables_used(result: dict, trace: dict) -> dict[str, list[str]]:
+    """Build audit tables_used from MCP validation/trace metadata.
+
+    MCP execute_safe_sql stores tables as dict keys with empty column lists.
+    Prefer validation.tables_used for the table set, and mark tables without
+    column detail as ["Used"] so the audit UI does not render N/A.
+    """
+    validation = result.get("validation") if isinstance(result.get("validation"), dict) else {}
+    validation_tables = validation.get("tables_used") or []
+    trace_tables = trace.get("tables_used") if isinstance(trace.get("tables_used"), dict) else {}
+
+    table_names: list[str] = []
+    if isinstance(validation_tables, list) and validation_tables:
+        table_names = [table for table in validation_tables if isinstance(table, str) and table]
+    elif isinstance(trace_tables, dict) and trace_tables:
+        table_names = list(trace_tables.keys())
+
+    normalized: dict[str, list[str]] = {}
+    for table in table_names:
+        cols: list[str] = []
+        raw = trace_tables.get(table) if isinstance(trace_tables, dict) else None
+        if isinstance(raw, list):
+            cols = [column for column in raw if column]
+        normalized[table] = cols if cols else ["Used"]
+    return normalized
+
+
 def extract_final_sql_and_tables(tool_name: str, result) -> tuple[str, dict[str, list[str]]]:
     if result is None or (isinstance(result, dict) and (result.get("error") or result.get("success") is False)):
         return "", {}
@@ -256,13 +283,7 @@ def extract_final_sql_and_tables(tool_name: str, result) -> tuple[str, dict[str,
     if tool_name in {"execute_safe_sql", "validate_safe_sql"} and isinstance(result, dict):
         trace = result.get("trace") if isinstance(result.get("trace"), dict) else {}
         sql = (trace.get("sql") or result.get("sql") or "").strip()
-        tables_used = trace.get("tables_used") or {}
-        if isinstance(tables_used, dict):
-            return sql, tables_used
-        validation = result.get("validation") if isinstance(result.get("validation"), dict) else {}
-        tables = validation.get("tables_used") or []
-        if isinstance(tables, list):
-            return sql, {table: [] for table in tables}
+        return sql, _normalize_mcp_tables_used(result, trace)
 
     sql_parts, tables = _collect_sql_and_tables(result)
     if not sql_parts and is_traced(result):

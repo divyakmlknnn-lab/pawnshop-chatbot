@@ -132,6 +132,70 @@ class SqlValidationValidTests(unittest.TestCase):
         self.assertEqual(result["columns_used"], ["email", "phone"])
 
 
+class SqlValidationQualifiedColumnTests(unittest.TestCase):
+    def test_approved_qualified_column_with_table_name(self):
+        result = validate_readonly_sql(
+            "SELECT customers.full_name FROM customers LIMIT 10"
+        )
+        self.assertTrue(result["valid"], result["reason"])
+        self.assertEqual(result["tables_used"], ["customers"])
+        self.assertIn("full_name", result["columns_used"])
+
+    def test_approved_aliased_qualified_column(self):
+        result = validate_readonly_sql(
+            "SELECT c.full_name FROM customers c LIMIT 10"
+        )
+        self.assertTrue(result["valid"], result["reason"])
+        self.assertEqual(result["tables_used"], ["customers"])
+        self.assertIn("full_name", result["columns_used"])
+
+    def test_distinct_aliased_qualified_column(self):
+        result = validate_readonly_sql(
+            "SELECT DISTINCT c.full_name FROM customers c LIMIT 10"
+        )
+        self.assertTrue(result["valid"], result["reason"])
+        self.assertIn("full_name", result["columns_used"])
+
+    def test_backtick_aliased_qualified_column(self):
+        result = validate_readonly_sql(
+            "SELECT `c`.`full_name` FROM customers `c` LIMIT 10"
+        )
+        self.assertTrue(result["valid"], result["reason"])
+        self.assertIn("full_name", result["columns_used"])
+
+    def test_invalid_column_through_valid_alias_rejected(self):
+        result = validate_readonly_sql(
+            "SELECT c.not_a_column FROM customers c LIMIT 10"
+        )
+        self.assertFalse(result["valid"])
+        self.assertIn("Unknown column: customers.not_a_column", result["reason"])
+
+    def test_unknown_alias_rejected(self):
+        result = validate_readonly_sql(
+            "SELECT x.full_name FROM customers c LIMIT 10"
+        )
+        self.assertFalse(result["valid"])
+        self.assertIn("Unknown table reference: x", result["reason"])
+
+    def test_customers_joined_with_collateral_items(self):
+        sql = (
+            "SELECT DISTINCT c.full_name, ci.item_type "
+            "FROM customers c "
+            "JOIN loans l ON c.customer_id = l.customer_id "
+            "JOIN collateral_items ci ON l.loan_id = ci.loan_id "
+            "WHERE ci.item_type LIKE '%iPhone%' "
+            "LIMIT 50"
+        )
+        result = validate_readonly_sql(sql)
+        self.assertTrue(result["valid"], result["reason"])
+        self.assertEqual(
+            result["tables_used"],
+            ["collateral_items", "customers", "loans"],
+        )
+        self.assertIn("full_name", result["columns_used"])
+        self.assertIn("item_type", result["columns_used"])
+
+
 class SqlValidationInvalidTests(unittest.TestCase):
     def test_delete_rejected(self):
         result = validate_readonly_sql("DELETE FROM customers")
