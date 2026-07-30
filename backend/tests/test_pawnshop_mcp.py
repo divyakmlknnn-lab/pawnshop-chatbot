@@ -47,7 +47,7 @@ class PawnshopMcpServerTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             tool_names,
-            ["validate_safe_sql", "execute_safe_sql"],
+            ["get_approved_schema", "validate_safe_sql", "execute_safe_sql"],
         )
 
         validate_tool = next(

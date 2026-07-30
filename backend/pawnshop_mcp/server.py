@@ -23,6 +23,12 @@ def approved_schema_resource() -> dict:
     return get_approved_schema()
 
 
+@mcp.tool(name="get_approved_schema")
+def get_approved_schema_tool() -> dict:
+    """Return the approved read-only schema metadata for safe SQL generation."""
+    return get_approved_schema()
+
+
 @mcp.tool(name="validate_safe_sql")
 def validate_safe_sql(sql: str) -> dict:
     """Validate a single read-only SELECT statement against the approved schema."""

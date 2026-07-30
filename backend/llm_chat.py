@@ -34,9 +34,7 @@ except ImportError:  # pragma: no cover - optional until MCP package is deployed
         return {"success": False, "error": "MCP is not available."}
 
 from tools import (
-    ALLOWED_TOOL_NAMES,
     BANNED_TOOL_NAMES,
-    TOOL_DEFINITIONS,
     execute_tool,
     gather_customer_summary,
 )
@@ -63,21 +61,27 @@ CUSTOMER_REQUIRED_ACTIONS = frozenset({
 })
 
 MCP_TOOL_NAMES = frozenset({
+    "get_approved_schema",
     "validate_safe_sql",
     "execute_safe_sql",
 })
+
+SQL_UNAVAILABLE_MESSAGE = (
+    "I couldn't complete that database request with a safe query. "
+    "Please rephrase the question or ask for a different portfolio view."
+)
 
 SYSTEM_PROMPT = """You are TellerIQ, a professional pawnshop and banking operations assistant.
 
 Rules:
 - Answer only using data returned by your tools. Never invent balances, dates, names, or loan details.
-- Prefer predefined lookup tools for standard portfolio and customer questions.
-- When a customer is referenced by partial name or pronoun, resolve them with search_customers or a customer-specific tool using customer_name before answering.
-- Use validate_safe_sql and execute_safe_sql only when no predefined tool directly answers the question.
+- For any question that needs portfolio, customer, loan, payment, collateral, or overdue data, use the MCP SQL tools only: get_approved_schema, validate_safe_sql, and execute_safe_sql.
+- Do not use predefined banking lookup tools. They are not available in this chat flow.
 - execute_safe_sql accepts read-only SELECT statements against the approved schema only.
-- For questions about who owes the most, highest overdue amount, highest total overdue amount, total owed per customer, ranked overdue balances, or the top overdue customer, you must use execute_safe_sql with aggregate SQL (SUM, GROUP BY, ORDER BY, LIMIT). Do not use row-level list tools such as get_overdue_customers for those questions.
-- Before writing SQL, use the approved schema reference below and prefer validate_safe_sql when column names are uncertain.
+- For ranking and totals (who owes the most, highest overdue amount, total owed per customer, ranked overdue balances, portfolio totals), use aggregate SQL with SUM, GROUP BY, ORDER BY, and LIMIT as needed.
+- Before writing SQL, use the approved schema reference below or call get_approved_schema. Prefer validate_safe_sql when column names are uncertain.
 - If validation or execution reports unknown tables or columns, read the error, consult the schema, correct the SQL, and retry within the available tool rounds.
+- If a safe SQL query still cannot be generated or validated, tell the user clearly that the request could not be completed. Do not invent rows or fall back to another tool.
 - Do not expose raw internal error text to the user; summarize the outcome in plain language after recovery attempts.
 - If multiple customers match a name, ask the user to clarify with the specific names returned.
 - For genuinely ambiguous requests, ask a focused clarifying question instead of listing generic capabilities.
@@ -103,21 +107,24 @@ def _get_gemini_client() -> genai.Client:
 
 
 def _gemini_function_declarations() -> list[dict]:
-    declarations = []
-    for tool in TOOL_DEFINITIONS:
-        function = tool["function"]
-        declarations.append(
-            {
-                "name": function["name"],
-                "description": function["description"],
-                "parameters": function["parameters"],
-            }
-        )
-    return declarations
+    """Predefined banking tools are retained in tools.py but not offered to Gemini."""
+    return []
 
 
 def _mcp_function_declarations() -> list[dict]:
     return [
+        {
+            "name": "get_approved_schema",
+            "description": (
+                "Return the approved read-only schema metadata, including tables, "
+                "fields, relationships, and computed fields. Call this when you "
+                "need schema details before writing SQL."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+            },
+        },
         {
             "name": "validate_safe_sql",
             "description": (
@@ -139,10 +146,10 @@ def _mcp_function_declarations() -> list[dict]:
             "name": "execute_safe_sql",
             "description": (
                 "Validate and execute a single read-only SELECT statement "
-                "against the approved pawnshop database schema. Use this only "
-                "when no existing predefined tool directly answers the question. "
-                "Approved aggregate SQL (SUM, GROUP BY, ORDER BY, LIMIT) may be "
-                "used for grouped totals and ranking questions."
+                "against the approved pawnshop database schema. Use this for "
+                "portfolio and customer data questions. Approved aggregate SQL "
+                "(SUM, GROUP BY, ORDER BY, LIMIT) may be used for grouped totals "
+                "and ranking questions."
             ),
             "parameters": {
                 "type": "object",
@@ -182,8 +189,32 @@ def _approved_schema_reference() -> str:
         schema = get_approved_schema()
         lines = ["Approved read-only schema (use exact table and column names):"]
         for table in sorted(schema.get("tables", {})):
-            fields = schema["tables"][table].get("fields", [])
-            lines.append(f"- {table}: {', '.join(fields)}")
+            table_meta = schema["tables"][table]
+            fields = table_meta.get("fields", [])
+            line = f"- {table}: {', '.join(fields)}"
+            computed = table_meta.get("computed_fields") or []
+            if computed:
+                computed_bits = [
+                    f"{item.get('name')} = {item.get('expression')}"
+                    for item in computed
+                    if item.get("name") and item.get("expression")
+                ]
+                if computed_bits:
+                    line += f"; computed: {'; '.join(computed_bits)}"
+            lines.append(line)
+
+        relationships = schema.get("relationships") or []
+        if relationships:
+            lines.append("Approved joins:")
+            for relationship in relationships:
+                lines.append(
+                    "- {from_table}.{from_column} = {to_table}.{to_column}".format(
+                        from_table=relationship.get("from_table"),
+                        from_column=relationship.get("from_column"),
+                        to_table=relationship.get("to_table"),
+                        to_column=relationship.get("to_column"),
+                    )
+                )
         return "\n".join(lines)
     except Exception:
         logger.exception("Unable to build approved schema reference for Gemini")
@@ -199,7 +230,8 @@ def _gemini_system_instruction(classification: IntentClassification) -> str:
 
 
 def _gemini_generate_config(classification: IntentClassification) -> types.GenerateContentConfig:
-    declarations = _gemini_function_declarations() + _mcp_function_declarations()
+    # Only MCP safe-SQL tools are registered for the normal chat flow.
+    declarations = _mcp_function_declarations()
     return types.GenerateContentConfig(
         system_instruction=_gemini_system_instruction(classification),
         tools=[types.Tool(function_declarations=declarations)],
@@ -272,7 +304,30 @@ def _call_mcp_tool_safe(tool_name: str, tool_args: dict) -> dict:
 def _execute_tool_call(tool_name: str, tool_args: dict):
     if tool_name in MCP_TOOL_NAMES:
         return _call_mcp_tool_safe(tool_name, tool_args)
-    return execute_tool(tool_name, tool_args)
+    return {
+        "success": False,
+        "error": f"Tool '{tool_name}' is not available in the chat flow.",
+    }
+
+
+def _mcp_result_failed(tool_name: str, tool_result) -> bool:
+    if tool_name not in MCP_TOOL_NAMES:
+        return True
+    if not isinstance(tool_result, dict):
+        return True
+    if tool_result.get("error"):
+        return True
+    if tool_name == "validate_safe_sql":
+        return tool_result.get("valid") is False
+    if tool_name == "execute_safe_sql":
+        return tool_result.get("success") is False
+    return False
+
+
+def _mcp_executions_failed(executions: list[tuple[str, dict, object]]) -> bool:
+    if not executions:
+        return False
+    return all(_mcp_result_failed(tool_name, tool_result) for tool_name, _, tool_result in executions)
 
 
 def _response(
@@ -503,8 +558,7 @@ def _validate_tool_call(tool_name: str) -> str | None:
     normalized = (tool_name or "").strip().lower()
     if normalized in BANNED_TOOL_NAMES:
         return f"Invalid tool name: {tool_name}"
-    allowed_names = set(ALLOWED_TOOL_NAMES) | MCP_TOOL_NAMES
-    if normalized not in allowed_names:
+    if normalized not in MCP_TOOL_NAMES:
         return f"Unknown tool: {tool_name}"
     return None
 
@@ -648,6 +702,13 @@ def _finalize_gemini_turn(
         )
 
     if executions:
+        if _mcp_executions_failed(executions):
+            return _message_html(
+                SQL_UNAVAILABLE_MESSAGE,
+                "Safe SQL could not be completed.",
+                classification,
+                executions,
+            )
         return _message_html(
             "I found related records but could not compose a final answer. Please try rephrasing your question.",
             "Gemini completed tool calls without a final answer.",
@@ -655,11 +716,7 @@ def _finalize_gemini_turn(
             executions,
         )
 
-    # Gemini completed with a blank turn (no text, no tools). Use the classifier
-    # only as a last-resort fallback when that intent is already operationally executable.
-    if _can_execute_operationally(classification):
-        return _execute_classification(message, classification)
-
+    # Do not fall back to predefined banking tools in the normal chat flow.
     return _message_html(
         CLARIFYING_MESSAGE,
         "Gemini returned no answer and no tool results were available.",
@@ -693,6 +750,10 @@ def _empty_gemini_fallback(
     )
 
 
+def _disabled_operational_fallback(message: str, classification: IntentClassification) -> dict:
+    raise RuntimeError("Predefined operational tools are disabled in the chat flow.")
+
+
 def _gemini_fallback_response(
     message: str,
     classification: IntentClassification,
@@ -702,7 +763,7 @@ def _gemini_fallback_response(
         message,
         classification,
         executions,
-        execute_operational=_execute_operational_if_ready,
+        execute_operational=_disabled_operational_fallback,
         response_from_executions=_response_from_executions,
         empty_fallback=_empty_gemini_fallback,
     )

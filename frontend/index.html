@@ -1718,6 +1718,14 @@ function trimConversation() {
     }
 }
 
+function toPersistedUiTurn(turn) {
+    return {
+        question: turn.question,
+        replyHtml: turn.replyHtml,
+        format: turn.format,
+    };
+}
+
 function saveConversation() {
     trimConversation();
     try {
@@ -1725,7 +1733,8 @@ function saveConversation() {
             CHAT_STORAGE_KEY,
             JSON.stringify({
                 history: conversationHistory,
-                uiTurns,
+                // Persist only safe chat fields; never store queryDetails/SQL/rows.
+                uiTurns: uiTurns.map(toPersistedUiTurn),
             })
         );
     } catch (error) {
@@ -1746,7 +1755,9 @@ function loadConversation() {
             return;
         }
         const history = Array.isArray(parsed.history) ? parsed.history.filter(isValidHistoryEntry) : [];
-        const turns = Array.isArray(parsed.uiTurns) ? parsed.uiTurns.filter(isValidUiTurn) : [];
+        const turns = Array.isArray(parsed.uiTurns)
+            ? parsed.uiTurns.filter(isValidUiTurn).map(toPersistedUiTurn)
+            : [];
         conversationHistory = history;
         uiTurns = turns;
         trimConversation();
@@ -1805,11 +1816,12 @@ function appendAnswerPanel(turn, options = {}) {
         panel.appendChild(header);
     }
 
+    const queryDetails = turn.queryDetails || null;
     const polishedReply = polishReplyCopy(turn.replyHtml);
     const { businessHtml, recommendedHtml } = splitReplyContent(polishedReply);
 
     if (recommendedHtml) {
-        const enhancedRecommended = enhanceRecommendedActionHtml(recommendedHtml, null);
+        const enhancedRecommended = enhanceRecommendedActionHtml(recommendedHtml, queryDetails);
         panel.appendChild(createViewCard("Recommended Action", enhancedRecommended, false, "action"));
     }
 
@@ -1827,6 +1839,32 @@ function appendAnswerPanel(turn, options = {}) {
         }
         summaryCard.querySelector(".view-card-body").appendChild(body);
         panel.appendChild(summaryCard);
+    }
+
+    if (queryDetails && !options.typing) {
+        const resultsHtml = renderResultsBody(queryDetails);
+        if (resultsHtml) {
+            panel.appendChild(createViewCard("Results", resultsHtml, false, "results"));
+        }
+
+        const detailsCard = createViewCard(
+            "Technical Audit",
+            renderQueryDetailsBody(queryDetails),
+            true,
+            "details"
+        );
+        const toggleButton = document.createElement("button");
+        toggleButton.type = "button";
+        toggleButton.className = "query-details-toggle";
+        toggleButton.textContent = "Show technical audit trail";
+        toggleButton.addEventListener("click", () => {
+            const hidden = detailsCard.classList.toggle("hidden");
+            toggleButton.textContent = hidden
+                ? "Show technical audit trail"
+                : "Hide technical audit trail";
+        });
+        panel.appendChild(toggleButton);
+        panel.appendChild(detailsCard);
     }
 
     if (options.prepend) {
@@ -2518,6 +2556,8 @@ async function sendMessage(text) {
             question: result.question || question,
             replyHtml,
             format: result.format || "html",
+            // Session-only; stripped before localStorage persistence.
+            queryDetails: result.query_details || null,
         });
         saveConversation();
         renderConversation();

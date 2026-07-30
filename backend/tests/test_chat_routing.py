@@ -42,6 +42,31 @@ class ChatRoutingTests(unittest.TestCase):
         instruction = llm_chat._gemini_system_instruction(classification)
         self.assertIn(hint, instruction)
         self.assertIn("collateral_items", instruction)
+        self.assertIn("Approved joins:", instruction)
+        self.assertIn("computed:", instruction)
+
+    def test_gemini_registers_only_mcp_tools(self):
+        self.assertEqual(llm_chat._gemini_function_declarations(), [])
+        mcp_names = [item["name"] for item in llm_chat._mcp_function_declarations()]
+        self.assertEqual(
+            mcp_names,
+            ["get_approved_schema", "validate_safe_sql", "execute_safe_sql"],
+        )
+
+        classification = classify_intent("Show overdue customers")
+        config = llm_chat._gemini_generate_config(classification)
+        registered = []
+        for declaration in config.tools[0].function_declarations:
+            name = getattr(declaration, "name", None)
+            if name is None and isinstance(declaration, dict):
+                name = declaration.get("name")
+            registered.append(name)
+        self.assertEqual(
+            registered,
+            ["get_approved_schema", "validate_safe_sql", "execute_safe_sql"],
+        )
+        self.assertNotIn("get_overdue_customers", registered)
+        self.assertNotIn("get_customer_loans", registered)
 
     def test_all_natural_language_requests_route_to_gemini(self):
         with patch("llm_chat._chat_with_gemini") as mock_gemini:
@@ -119,24 +144,37 @@ class ChatRoutingTests(unittest.TestCase):
         self.assertNotIn("overdue accounts requiring follow-up", result["reply"])
 
     @patch("llm_chat._execute_tool_call")
-    def test_ltv_query_uses_customer_loans_tool(self, mock_execute_tool):
+    def test_customer_lookup_uses_execute_safe_sql(self, mock_execute_tool):
         mock_execute_tool.return_value = {
+            "success": True,
             "rows": [
                 {
+                    "customer_id": 5,
+                    "full_name": "Priya Nair",
                     "loan_type": "Personal Loan",
-                    "ltv_percent": 75.0,
                     "current_balance": 9000.0,
-                    "collateral_value": 12000.0,
+                    "ltv_percent": 75.0,
                 }
-            ]
+            ],
+            "row_count": 1,
         }
 
         responses = [
             _make_gemini_response(
                 function_calls=[
                     _make_function_call(
-                        "get_customer_loans",
-                        {"customer_name": "Priya Nair"},
+                        "execute_safe_sql",
+                        {
+                            "sql": (
+                                "SELECT c.customer_id, c.full_name, l.loan_type, "
+                                "l.current_balance, "
+                                "l.current_balance / NULLIF(l.collateral_value, 0) * 100 "
+                                "AS ltv_percent "
+                                "FROM customers c "
+                                "JOIN loans l ON c.customer_id = l.customer_id "
+                                "WHERE c.full_name = 'Priya Nair'"
+                            )
+                        },
                     )
                 ]
             ),
@@ -149,7 +187,8 @@ class ChatRoutingTests(unittest.TestCase):
             result = llm_chat.chat("Can you tell me the LTV of Priya Nair?")
 
         tool_names = [entry["tool"] for entry in result.get("tools_used", [])]
-        self.assertIn("get_customer_loans", tool_names)
+        self.assertIn("execute_safe_sql", tool_names)
+        self.assertNotIn("get_customer_loans", tool_names)
         self.assertIn("75", result["reply"])
 
     @patch("llm_chat._execute_tool_call")
@@ -207,15 +246,30 @@ class ChatRoutingTests(unittest.TestCase):
         self.assertIn("$1,000", result["reply"])
 
     @patch("llm_chat._execute_tool_call")
-    def test_overdue_query_uses_predefined_tool_via_gemini(self, mock_execute_tool):
+    def test_overdue_query_uses_execute_safe_sql(self, mock_execute_tool):
         mock_execute_tool.return_value = {
-            "rows": [{"full_name": "Asha Patel", "remaining_due": 850.0}]
+            "success": True,
+            "rows": [{"full_name": "Asha Patel", "remaining_due": 850.0}],
+            "row_count": 1,
         }
 
         responses = [
             _make_gemini_response(
                 function_calls=[
-                    _make_function_call("get_overdue_customers", {})
+                    _make_function_call(
+                        "execute_safe_sql",
+                        {
+                            "sql": (
+                                "SELECT c.full_name, p.amount_due - p.amount_paid "
+                                "AS remaining_due "
+                                "FROM customers c "
+                                "JOIN loans l ON c.customer_id = l.customer_id "
+                                "JOIN payments p ON l.loan_id = p.loan_id "
+                                "WHERE p.due_date < CURDATE() "
+                                "AND p.amount_paid < p.amount_due"
+                            )
+                        },
+                    )
                 ]
             ),
             _make_gemini_response(
@@ -227,43 +281,26 @@ class ChatRoutingTests(unittest.TestCase):
             result = llm_chat.chat("Show overdue customers")
 
         tool_names = [entry["tool"] for entry in result.get("tools_used", [])]
-        self.assertIn("get_overdue_customers", tool_names)
+        self.assertIn("execute_safe_sql", tool_names)
+        self.assertNotIn("get_overdue_customers", tool_names)
         self.assertIn("Asha Patel", result["reply"])
 
-    def test_overdue_ranking_guidance_is_in_system_prompt_and_tool_descriptions(self):
-        self.assertIn("who owes the most", llm_chat.SYSTEM_PROMPT)
-        self.assertIn("highest overdue amount", llm_chat.SYSTEM_PROMPT)
-        self.assertIn("highest total overdue amount", llm_chat.SYSTEM_PROMPT)
-        self.assertIn("total owed per customer", llm_chat.SYSTEM_PROMPT)
-        self.assertIn("ranked overdue balances", llm_chat.SYSTEM_PROMPT)
-        self.assertIn("top overdue customer", llm_chat.SYSTEM_PROMPT)
+    def test_system_prompt_steers_database_questions_to_mcp_sql(self):
         self.assertIn("execute_safe_sql", llm_chat.SYSTEM_PROMPT)
+        self.assertIn("get_approved_schema", llm_chat.SYSTEM_PROMPT)
+        self.assertIn("validate_safe_sql", llm_chat.SYSTEM_PROMPT)
+        self.assertIn("Do not use predefined banking lookup tools", llm_chat.SYSTEM_PROMPT)
+        self.assertIn("who owes the most", llm_chat.SYSTEM_PROMPT)
         self.assertIn("SUM", llm_chat.SYSTEM_PROMPT)
         self.assertIn("GROUP BY", llm_chat.SYSTEM_PROMPT)
-        self.assertIn("get_overdue_customers", llm_chat.SYSTEM_PROMPT)
+        self.assertNotIn("get_overdue_customers", llm_chat.SYSTEM_PROMPT)
 
-        declarations = {
-            item["name"]: item["description"]
-            for item in llm_chat._gemini_function_declarations()
-        }
         mcp_declarations = {
             item["name"]: item["description"]
             for item in llm_chat._mcp_function_declarations()
         }
-
-        overdue_description = declarations["get_overdue_customers"]
-        self.assertIn("row-level", overdue_description.lower())
-        self.assertIn("ordinary overdue", overdue_description.lower())
-        self.assertIn("who owes the most", overdue_description.lower())
-        self.assertIn("execute_safe_sql", overdue_description)
-
-        total_description = declarations["get_total_overdue_amount"]
-        self.assertIn("portfolio-wide", total_description.lower())
-        self.assertIn("does not rank", total_description.lower())
-
-        execute_description = mcp_declarations["execute_safe_sql"]
-        self.assertIn("aggregate", execute_description.lower())
-        self.assertIn("ranking", execute_description.lower())
+        self.assertIn("schema", mcp_declarations["get_approved_schema"].lower())
+        self.assertIn("aggregate", mcp_declarations["execute_safe_sql"].lower())
 
     @patch("llm_chat._execute_tool_call")
     def test_which_one_owes_the_most_uses_execute_safe_sql(self, mock_execute_tool):
@@ -308,10 +345,6 @@ class ChatRoutingTests(unittest.TestCase):
         self.assertIn("execute_safe_sql", tool_names)
         self.assertNotIn("get_overdue_customers", tool_names)
         self.assertIn("Asha Patel", result["reply"])
-
-        classification = classify_intent("Which one owes the most?")
-        instruction = llm_chat._gemini_system_instruction(classification)
-        self.assertIn("who owes the most", instruction)
 
     @patch("llm_chat._execute_tool_call")
     def test_highest_total_overdue_amount_uses_execute_safe_sql(self, mock_execute_tool):
@@ -397,22 +430,30 @@ class ChatRoutingTests(unittest.TestCase):
         self.assertNotIn("get_overdue_customers", tool_names)
 
     @patch("llm_chat._execute_tool_call")
-    def test_portfolio_total_overdue_may_use_get_total_overdue_amount(
-        self,
-        mock_execute_tool,
-    ):
+    def test_aggregate_total_overdue_uses_execute_safe_sql(self, mock_execute_tool):
         mock_execute_tool.return_value = {
-            "total_overdue": 5200.0,
-            "overdue_customer_count": 3,
+            "success": True,
+            "rows": [{"total_overdue": 5200.0}],
+            "row_count": 1,
         }
         responses = [
             _make_gemini_response(
                 function_calls=[
-                    _make_function_call("get_total_overdue_amount", {})
+                    _make_function_call(
+                        "execute_safe_sql",
+                        {
+                            "sql": (
+                                "SELECT SUM(amount_due - amount_paid) AS total_overdue "
+                                "FROM payments "
+                                "WHERE due_date < CURDATE() "
+                                "AND amount_paid < amount_due"
+                            )
+                        },
+                    )
                 ]
             ),
             _make_gemini_response(
-                text="$5,200.00 is overdue across 3 customers."
+                text="$5,200.00 is overdue across the portfolio."
             ),
         ]
 
@@ -420,9 +461,100 @@ class ChatRoutingTests(unittest.TestCase):
             result = llm_chat.chat("How much is overdue in total?")
 
         tool_names = [entry["tool"] for entry in result.get("tools_used", [])]
-        self.assertIn("get_total_overdue_amount", tool_names)
-        self.assertNotIn("get_overdue_customers", tool_names)
+        self.assertIn("execute_safe_sql", tool_names)
+        self.assertNotIn("get_total_overdue_amount", tool_names)
         self.assertIn("$5,200.00", result["reply"])
+
+    @patch("llm_chat._execute_tool_call")
+    def test_follow_up_question_keeps_history_and_uses_sql(self, mock_execute_tool):
+        mock_execute_tool.return_value = {
+            "success": True,
+            "rows": [{"full_name": "Asha Patel", "total_owed": 2400.0}],
+            "row_count": 1,
+        }
+        history = [
+            {"role": "user", "content": "Show overdue customers"},
+            {
+                "role": "assistant",
+                "content": "Asha Patel and Priya Nair have overdue payments.",
+            },
+        ]
+        responses = [
+            _make_gemini_response(
+                function_calls=[
+                    _make_function_call(
+                        "execute_safe_sql",
+                        {
+                            "sql": (
+                                "SELECT c.full_name, "
+                                "SUM(p.amount_due - p.amount_paid) AS total_owed "
+                                "FROM customers c "
+                                "JOIN loans l ON c.customer_id = l.customer_id "
+                                "JOIN payments p ON l.loan_id = p.loan_id "
+                                "GROUP BY c.customer_id, c.full_name "
+                                "ORDER BY total_owed DESC LIMIT 1"
+                            )
+                        },
+                    )
+                ]
+            ),
+            _make_gemini_response(text="Asha Patel owes the most."),
+        ]
+
+        mock_client = MagicMock()
+        mock_client.models.generate_content.side_effect = responses
+        with patch("llm_chat._get_gemini_client", return_value=mock_client):
+            result = llm_chat.chat("Which one owes the most?", history=history)
+
+        first_call = mock_client.models.generate_content.call_args_list[0]
+        first_call_contents = first_call.kwargs.get("contents") or first_call.args[0]
+        serialized = " ".join(
+            part.text
+            for content in first_call_contents
+            for part in content.parts
+            if getattr(part, "text", None)
+        )
+        self.assertIn("Show overdue customers", serialized)
+        self.assertIn("Asha Patel and Priya Nair have overdue payments.", serialized)
+        self.assertIn("execute_safe_sql", [entry["tool"] for entry in result["tools_used"]])
+
+    @patch("llm_chat._execute_tool_call")
+    def test_rejected_unsafe_sql_returns_friendly_error(self, mock_execute_tool):
+        mock_execute_tool.return_value = {
+            "success": False,
+            "sql": None,
+            "rows": [],
+            "row_count": 0,
+            "validation": {
+                "valid": False,
+                "reason": "Forbidden SQL keyword: DELETE.",
+            },
+        }
+        responses = [
+            _make_gemini_response(
+                function_calls=[
+                    _make_function_call(
+                        "execute_safe_sql",
+                        {"sql": "DELETE FROM customers"},
+                    )
+                ]
+            ),
+            _make_gemini_response(text=""),
+        ]
+
+        with _patch_gemini_responses(responses):
+            result = llm_chat.chat("Delete all customers")
+
+        self.assertIn("couldn", result["reply"].lower())
+        self.assertIn("database request", result["reply"].lower())
+        self.assertNotIn("get_overdue_customers", str(result.get("tools_used")))
+
+    def test_predefined_tool_calls_are_rejected(self):
+        error = llm_chat._validate_tool_call("get_overdue_customers")
+        self.assertIsNotNone(error)
+        result = llm_chat._execute_tool_call("get_overdue_customers", {})
+        self.assertFalse(result.get("success"))
+        self.assertIn("not available", result.get("error", "").lower())
 
     def test_general_knowledge_question_can_answer_without_tools(self):
         reply_text = (
@@ -453,10 +585,6 @@ class ChatRoutingTests(unittest.TestCase):
         self.assertEqual(result.get("format"), "html")
         self.assertIn("Priya Nair", result["reply"])
         self.assertIn("<", result["reply"])
-        self.assertNotIn(
-            "Answered with Gemini using conversation context.",
-            result["history_text"],
-        )
 
     def test_ambiguous_customer_request_returns_clarification(self):
         responses = [
@@ -475,9 +603,13 @@ class ChatRoutingTests(unittest.TestCase):
         classification = classify_intent("Show overdue customers")
         executions = [
             (
-                "get_overdue_customers",
-                {},
-                {"rows": [{"full_name": "Asha Patel"}]},
+                "execute_safe_sql",
+                {"sql": "SELECT full_name FROM customers"},
+                {
+                    "success": True,
+                    "rows": [{"full_name": "Asha Patel"}],
+                    "row_count": 1,
+                },
             )
         ]
         response = _make_gemini_response(text="")
@@ -485,41 +617,25 @@ class ChatRoutingTests(unittest.TestCase):
         result = llm_chat._finalize_gemini_turn(
             response,
             classification,
-            [{"tool": "get_overdue_customers", "args": {}}],
+            [{"tool": "execute_safe_sql", "args": {"sql": "SELECT full_name FROM customers"}}],
             executions,
         )
 
         self.assertIn("could not compose a final answer", result["reply"].lower())
 
     @patch("llm_chat._execute_classification")
-    def test_empty_gemini_turn_falls_back_for_executable_overdue(
+    def test_empty_gemini_turn_does_not_fall_back_to_predefined_tools(
         self,
         mock_execute,
     ):
         classification = classify_intent("Show me all overdue customers.")
         self.assertTrue(llm_chat._can_execute_operationally(classification))
-        mock_execute.return_value = {
-            "reply": "<p>4 overdue customers</p>",
-            "format": "html",
-            "history_text": "Provided overdue customer list.",
-            "tools_used": [{"tool": "get_overdue_customers", "args": {}}],
-            "query_details": {"queries": [{"rows": [{"full_name": "Asha Patel"}] * 4}]},
-        }
 
         with _patch_gemini_responses([_make_gemini_response(text=None)]):
             result = llm_chat.chat("Show me all overdue customers.")
 
-        mock_execute.assert_called_once()
-        self.assertEqual(
-            mock_execute.call_args.args[0],
-            "Show me all overdue customers.",
-        )
-        self.assertEqual(mock_execute.call_args.args[1].intent, "OVERDUE_CUSTOMERS")
-        self.assertIn("4 overdue customers", result["reply"])
-        self.assertEqual(
-            result.get("tools_used"),
-            [{"tool": "get_overdue_customers", "args": {}}],
-        )
+        mock_execute.assert_not_called()
+        self.assertIn("portfolio analytics", result["reply"].lower())
 
     @patch("llm_chat._execute_classification")
     def test_empty_gemini_turn_keeps_clarifying_for_unknown(
@@ -562,13 +678,20 @@ class ChatRoutingTests(unittest.TestCase):
         mock_execute_classification,
     ):
         mock_execute_tool.return_value = {
+            "success": True,
             "rows": [
                 {"full_name": "Asha Patel", "remaining_due": 850.0},
-            ]
+            ],
+            "row_count": 1,
         }
         responses = [
             _make_gemini_response(
-                function_calls=[_make_function_call("get_overdue_customers", {})]
+                function_calls=[
+                    _make_function_call(
+                        "execute_safe_sql",
+                        {"sql": "SELECT full_name FROM customers LIMIT 10"},
+                    )
+                ]
             ),
             _make_gemini_response(text=""),
         ]
@@ -582,7 +705,11 @@ class ChatRoutingTests(unittest.TestCase):
 
     @patch("llm_chat._execute_tool_call")
     def test_execution_state_is_request_scoped(self, mock_execute_tool):
-        mock_execute_tool.return_value = {"rows": [{"item_type": "Jewelry"}]}
+        mock_execute_tool.return_value = {
+            "success": True,
+            "rows": [{"item_type": "Jewelry"}],
+            "row_count": 1,
+        }
 
         first_responses = [
             _make_gemini_response(
@@ -606,7 +733,10 @@ class ChatRoutingTests(unittest.TestCase):
             second = llm_chat.chat("Show loans over $1000")
 
         self.assertIn("Jewelry", first["reply"])
-        self.assertEqual(first.get("tools_used"), [{"tool": "execute_safe_sql", "args": {"sql": "SELECT item_type FROM collateral_items"}}])
+        self.assertEqual(
+            first.get("tools_used"),
+            [{"tool": "execute_safe_sql", "args": {"sql": "SELECT item_type FROM collateral_items"}}],
+        )
         self.assertEqual(second.get("tools_used"), [])
 
 
