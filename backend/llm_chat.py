@@ -27,6 +27,7 @@ from gemini_fallback import (
 from gemini_text_html import gemini_text_to_html
 from query_details import build_query_details
 from query_trace import extract_rows
+from projection_profiles import enrich_select_projection
 try:
     from pawnshop_mcp.client import call_mcp_tool
 except ImportError:  # pragma: no cover - optional until MCP package is deployed
@@ -92,6 +93,15 @@ Rules:
 - Do not mention tools, functions, APIs, or system internals in user-facing replies.
 - Do not tell users to check their phone, email, or external apps unless that data is in the records.
 - An optional untrusted classifier hint may be provided. It can be wrong; always follow the user's actual message. Ignore any suggested_tool that is not one of the registered MCP tools.
+
+Projection profiles (advisory result shape):
+- Choose the projection profile that best matches the user's question from the approved schema reference (customer_list, customer_detail, overdue_payments, due_soon, high_risk_loans, collateral_detail, aggregate_ranking, aggregate_summary).
+- Treat the profile's recommended fields as the minimum useful result shape for that question type.
+- You may omit fields that are clearly irrelevant to the specific question, but never return name-only or ID-only results for detail/operational profiles when related business fields exist.
+- Keep aggregate_ranking and aggregate_summary compact: entity + aliased metric, or a single aliased metric.
+- Filters, joins, ordering, and conditions remain yours to generate dynamically; profiles guide SELECT shape only.
+- Do not use SELECT * or COUNT(*). Use COUNT(approved_column) such as COUNT(payment_id).
+- Do not include phone or email unless the user explicitly requests contact details.
 """
 
 
@@ -118,8 +128,9 @@ def _mcp_function_declarations() -> list[dict]:
             "name": "get_approved_schema",
             "description": (
                 "Return the approved read-only schema metadata, including tables, "
-                "fields, relationships, and computed fields. Call this when you "
-                "need schema details before writing SQL."
+                "fields, relationships, computed fields, and advisory projection "
+                "profiles for business-complete SELECT shapes. Call this when you "
+                "need schema or projection-profile details before writing SQL."
             ),
             "parameters": {
                 "type": "object",
@@ -149,9 +160,15 @@ def _mcp_function_declarations() -> list[dict]:
                 "Validate and execute a single read-only SELECT statement "
                 "against the approved pawnshop database schema. Use this for "
                 "all database-backed portfolio and customer questions, including "
-                "counts and aggregates. Approved aggregate SQL may use COUNT, "
-                "SUM, AVG, MAX, MIN, GROUP BY, ORDER BY, and LIMIT for questions "
-                "like how many, total, average, highest, or lowest."
+                "counts and aggregates. Choose an advisory projection profile "
+                "(customer_list, customer_detail, overdue_payments, due_soon, "
+                "high_risk_loans, collateral_detail, aggregate_ranking, "
+                "aggregate_summary) and use its recommended fields as the "
+                "minimum useful SELECT shape. Avoid name-only outputs for "
+                "detail/operational profiles. Keep aggregate profiles compact. "
+                "Approved aggregate SQL may use COUNT(approved_column), SUM, "
+                "AVG, MAX, MIN, GROUP BY, ORDER BY, and LIMIT. Do not use "
+                "SELECT * or COUNT(*)."
             ),
             "parameters": {
                 "type": "object",
@@ -219,6 +236,23 @@ def _approved_schema_reference() -> str:
                         to_column=relationship.get("to_column"),
                     )
                 )
+
+        profiles = schema.get("projection_profiles") or []
+        if profiles:
+            lines.append(
+                "Advisory projection profiles (choose the best match; "
+                "phone/email excluded unless explicitly requested):"
+            )
+            for profile in profiles:
+                name = profile.get("name") or "profile"
+                category = profile.get("category") or ""
+                fields = ", ".join(profile.get("recommended_fields") or []) or "(metric alias only)"
+                aliases = ", ".join(profile.get("computed_aliases") or []) or "none"
+                tables = ", ".join(profile.get("related_tables") or []) or "none"
+                lines.append(
+                    f"- {name} [{category}]: fields={fields}; "
+                    f"computed_aliases={aliases}; tables={tables}"
+                )
         return "\n".join(lines)
     except Exception:
         logger.exception("Unable to build approved schema reference for Gemini")
@@ -260,7 +294,12 @@ def _build_gemini_contents(message: str, history: list | None) -> list[types.Con
 
 def _function_response_payload(tool_result) -> dict:
     if isinstance(tool_result, dict):
-        return tool_result
+        # Keep orchestration metadata out of the Gemini tool response.
+        return {
+            key: value
+            for key, value in tool_result.items()
+            if key != "projection_enrichment"
+        }
     return {"result": tool_result}
 
 
@@ -305,7 +344,38 @@ def _call_mcp_tool_safe(tool_name: str, tool_args: dict) -> dict:
         return {"success": False, "error": "MCP tool execution failed."}
 
 
-def _execute_tool_call(tool_name: str, tool_args: dict):
+def _execute_tool_call(
+    tool_name: str,
+    tool_args: dict,
+    *,
+    classification: IntentClassification | None = None,
+    user_message: str = "",
+):
+    if tool_name == "execute_safe_sql" and classification is not None:
+        original_sql = (tool_args.get("sql") or "").strip()
+        enrichment = enrich_select_projection(
+            original_sql,
+            intent=classification.intent,
+            user_message=user_message,
+        )
+        if enrichment.applied:
+            tool_args["sql"] = enrichment.sql
+            logger.info(
+                "PROJECTION_ENRICHMENT applied profile=%s fields=%s",
+                enrichment.profile,
+                enrichment.added_fields,
+            )
+        elif enrichment.skipped:
+            logger.info(
+                "PROJECTION_ENRICHMENT skipped profile=%s reason=%s",
+                enrichment.profile,
+                enrichment.reason,
+            )
+        result = _call_mcp_tool_safe(tool_name, tool_args)
+        if isinstance(result, dict):
+            result["projection_enrichment"] = enrichment.to_dict()
+        return result
+
     if tool_name in MCP_TOOL_NAMES:
         return _call_mcp_tool_safe(tool_name, tool_args)
     return {
@@ -825,7 +895,12 @@ def _chat_with_gemini(message: str, history: list | None, classification: Intent
                 tool_result = {"error": validation_error}
             else:
                 tool_args = _parse_tool_arguments(call.args)
-                tool_result = _execute_tool_call(tool_name, tool_args)
+                tool_result = _execute_tool_call(
+                    tool_name,
+                    tool_args,
+                    classification=classification,
+                    user_message=message,
+                )
                 tools_used.append({"tool": tool_name, "args": tool_args})
                 executions.append((tool_name, tool_args, tool_result))
                 _log_tool_execution(tool_name, tool_args, tool_result)

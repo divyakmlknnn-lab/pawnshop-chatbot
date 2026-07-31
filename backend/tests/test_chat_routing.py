@@ -32,6 +32,19 @@ def _patch_gemini_responses(responses: list):
     return patch("llm_chat._get_gemini_client", return_value=mock_client)
 
 
+def _execute_sql_from_result(result: dict) -> str:
+    for entry in result.get("tools_used") or []:
+        if entry.get("tool") == "execute_safe_sql":
+            return (entry.get("args") or {}).get("sql") or ""
+    return ""
+
+
+def _assert_sql_has_columns(test_case: unittest.TestCase, sql: str, columns: list[str]) -> None:
+    lowered = sql.lower()
+    for column in columns:
+        test_case.assertIn(column.lower(), lowered, f"missing column {column} in SQL: {sql}")
+
+
 class ChatRoutingTests(unittest.TestCase):
     def test_classifier_hint_is_untrusted_metadata_only(self):
         classification = classify_intent("What are the different collaterals")
@@ -202,7 +215,7 @@ class ChatRoutingTests(unittest.TestCase):
 
     @patch("llm_chat._execute_tool_call")
     def test_loans_over_amount_recovers_from_invalid_column(self, mock_execute_tool):
-        def execute_side_effect(tool_name, tool_args):
+        def execute_side_effect(tool_name, tool_args, **_kwargs):
             if tool_name == "validate_safe_sql" and "amount" in tool_args.get("sql", ""):
                 return {
                     "valid": False,
@@ -314,6 +327,7 @@ class ChatRoutingTests(unittest.TestCase):
             for item in llm_chat._mcp_function_declarations()
         }
         self.assertIn("schema", mcp_declarations["get_approved_schema"].lower())
+        self.assertIn("projection", mcp_declarations["get_approved_schema"].lower())
         execute_desc = mcp_declarations["execute_safe_sql"]
         self.assertIn("COUNT", execute_desc)
         self.assertIn("SUM", execute_desc)
@@ -322,7 +336,298 @@ class ChatRoutingTests(unittest.TestCase):
         self.assertIn("MIN", execute_desc)
         self.assertIn("GROUP BY", execute_desc)
         self.assertIn("ORDER BY", execute_desc)
-        self.assertIn("how many", execute_desc.lower())
+        self.assertIn("projection profile", execute_desc.lower())
+
+    def test_projection_profiles_are_surfaced_in_prompt_and_tools(self):
+        prompt = llm_chat.SYSTEM_PROMPT
+        for profile_name in (
+            "customer_list",
+            "customer_detail",
+            "overdue_payments",
+            "due_soon",
+            "high_risk_loans",
+            "collateral_detail",
+            "aggregate_ranking",
+            "aggregate_summary",
+        ):
+            self.assertIn(profile_name, prompt)
+
+        self.assertIn("minimum useful result shape", prompt)
+        self.assertIn("never return name-only", prompt.lower())
+        self.assertIn("Do not use SELECT * or COUNT(*)", prompt)
+
+        instruction = llm_chat._gemini_system_instruction(
+            classify_intent("Show overdue customers")
+        )
+        self.assertIn("Advisory projection profiles", instruction)
+        self.assertIn("overdue_payments", instruction)
+        self.assertIn("remaining_due", instruction)
+
+        execute_desc = next(
+            item["description"]
+            for item in llm_chat._mcp_function_declarations()
+            if item["name"] == "execute_safe_sql"
+        )
+        self.assertIn("overdue_payments", execute_desc)
+        self.assertIn("aggregate_summary", execute_desc)
+        self.assertIn("Do not use SELECT * or COUNT(*)", execute_desc)
+
+    @patch("llm_chat._execute_tool_call")
+    def test_sql_shape_customer_detail_uses_profile_fields(self, mock_execute_tool):
+        detail_sql = (
+            "SELECT c.customer_id, c.full_name, l.loan_type, l.current_balance, "
+            "l.collateral_value, "
+            "l.current_balance / NULLIF(l.collateral_value, 0) * 100 AS ltv_percent, "
+            "l.next_due_date, p.amount_due, p.amount_paid, "
+            "p.amount_due - p.amount_paid AS remaining_due, p.due_date, "
+            "ci.item_type, ci.item_description, ci.appraised_value, ci.item_status "
+            "FROM customers c "
+            "JOIN loans l ON c.customer_id = l.customer_id "
+            "JOIN payments p ON l.loan_id = p.loan_id "
+            "JOIN collateral_items ci ON l.loan_id = ci.loan_id "
+            "WHERE c.full_name = 'Priya Nair'"
+        )
+        mock_execute_tool.return_value = {
+            "success": True,
+            "rows": [{"customer_id": 3, "full_name": "Priya Nair"}],
+            "row_count": 1,
+        }
+        responses = [
+            _make_gemini_response(
+                function_calls=[_make_function_call("execute_safe_sql", {"sql": detail_sql})]
+            ),
+            _make_gemini_response(text="Priya Nair has loan, payment, and collateral details."),
+        ]
+        with _patch_gemini_responses(responses):
+            result = llm_chat.chat("Show all details for Priya Nair")
+        sql = _execute_sql_from_result(result)
+        _assert_sql_has_columns(
+            self,
+            sql,
+            [
+                "customer_id",
+                "full_name",
+                "loan_type",
+                "current_balance",
+                "remaining_due",
+                "item_type",
+                "item_status",
+            ],
+        )
+
+    @patch("llm_chat._execute_tool_call")
+    def test_sql_shape_overdue_uses_profile_fields(self, mock_execute_tool):
+        overdue_sql = (
+            "SELECT c.customer_id, c.full_name, l.loan_type, p.amount_due, "
+            "p.amount_paid, p.amount_due - p.amount_paid AS remaining_due, "
+            "p.due_date, "
+            "l.current_balance / NULLIF(l.collateral_value, 0) * 100 AS ltv_percent "
+            "FROM customers c "
+            "JOIN loans l ON c.customer_id = l.customer_id "
+            "JOIN payments p ON l.loan_id = p.loan_id "
+            "WHERE p.due_date < CURDATE() AND p.amount_paid < p.amount_due"
+        )
+        mock_execute_tool.return_value = {
+            "success": True,
+            "rows": [{"customer_id": 1, "full_name": "Asha Patel", "remaining_due": 100.0}],
+            "row_count": 1,
+        }
+        responses = [
+            _make_gemini_response(
+                function_calls=[_make_function_call("execute_safe_sql", {"sql": overdue_sql})]
+            ),
+            _make_gemini_response(text="Overdue customers include Asha Patel."),
+        ]
+        with _patch_gemini_responses(responses):
+            result = llm_chat.chat("Show all overdue customers")
+        sql = _execute_sql_from_result(result)
+        _assert_sql_has_columns(
+            self,
+            sql,
+            [
+                "customer_id",
+                "full_name",
+                "loan_type",
+                "amount_due",
+                "amount_paid",
+                "remaining_due",
+                "due_date",
+                "ltv_percent",
+            ],
+        )
+
+    @patch("llm_chat._execute_tool_call")
+    def test_sql_shape_due_soon_uses_profile_fields(self, mock_execute_tool):
+        due_soon_sql = (
+            "SELECT c.customer_id, c.full_name, l.loan_type, p.amount_due, "
+            "p.amount_paid, p.amount_due - p.amount_paid AS remaining_due, p.due_date "
+            "FROM customers c "
+            "JOIN loans l ON c.customer_id = l.customer_id "
+            "JOIN payments p ON l.loan_id = p.loan_id "
+            "WHERE p.due_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY) "
+            "AND p.amount_paid < p.amount_due"
+        )
+        mock_execute_tool.return_value = {
+            "success": True,
+            "rows": [{"customer_id": 1, "full_name": "Asha Patel"}],
+            "row_count": 1,
+        }
+        responses = [
+            _make_gemini_response(
+                function_calls=[_make_function_call("execute_safe_sql", {"sql": due_soon_sql})]
+            ),
+            _make_gemini_response(text="Payments due soon include Asha Patel."),
+        ]
+        with _patch_gemini_responses(responses):
+            result = llm_chat.chat("Show payments due soon")
+        sql = _execute_sql_from_result(result)
+        _assert_sql_has_columns(
+            self,
+            sql,
+            [
+                "customer_id",
+                "full_name",
+                "loan_type",
+                "amount_due",
+                "amount_paid",
+                "remaining_due",
+                "due_date",
+            ],
+        )
+
+    @patch("llm_chat._execute_tool_call")
+    def test_sql_shape_high_risk_uses_profile_fields(self, mock_execute_tool):
+        high_risk_sql = (
+            "SELECT c.customer_id, c.full_name, l.loan_type, l.current_balance, "
+            "l.collateral_value, "
+            "l.current_balance / NULLIF(l.collateral_value, 0) * 100 AS ltv_percent, "
+            "l.next_due_date "
+            "FROM customers c "
+            "JOIN loans l ON c.customer_id = l.customer_id "
+            "WHERE l.current_balance / NULLIF(l.collateral_value, 0) * 100 >= 75"
+        )
+        mock_execute_tool.return_value = {
+            "success": True,
+            "rows": [{"customer_id": 1, "full_name": "Asha Patel", "ltv_percent": 80.0}],
+            "row_count": 1,
+        }
+        responses = [
+            _make_gemini_response(
+                function_calls=[_make_function_call("execute_safe_sql", {"sql": high_risk_sql})]
+            ),
+            _make_gemini_response(text="High-risk loans include Asha Patel."),
+        ]
+        with _patch_gemini_responses(responses):
+            result = llm_chat.chat("Show high-risk loans")
+        sql = _execute_sql_from_result(result)
+        _assert_sql_has_columns(
+            self,
+            sql,
+            [
+                "customer_id",
+                "full_name",
+                "loan_type",
+                "current_balance",
+                "collateral_value",
+                "ltv_percent",
+                "next_due_date",
+            ],
+        )
+
+    @patch("llm_chat._execute_tool_call")
+    def test_sql_shape_collateral_uses_profile_fields(self, mock_execute_tool):
+        collateral_sql = (
+            "SELECT c.customer_id, c.full_name, ci.item_type, ci.item_description, "
+            "ci.appraised_value, ci.item_status "
+            "FROM customers c "
+            "JOIN loans l ON c.customer_id = l.customer_id "
+            "JOIN collateral_items ci ON l.loan_id = ci.loan_id "
+            "WHERE ci.item_type LIKE '%iPhone%'"
+        )
+        mock_execute_tool.return_value = {
+            "success": True,
+            "rows": [{"customer_id": 1, "full_name": "Asha Patel", "item_type": "iPhone"}],
+            "row_count": 1,
+        }
+        responses = [
+            _make_gemini_response(
+                function_calls=[_make_function_call("execute_safe_sql", {"sql": collateral_sql})]
+            ),
+            _make_gemini_response(text="Asha Patel has iPhone collateral."),
+        ]
+        with _patch_gemini_responses(responses):
+            result = llm_chat.chat("Who has iPhone as collateral?")
+        sql = _execute_sql_from_result(result)
+        _assert_sql_has_columns(
+            self,
+            sql,
+            [
+                "customer_id",
+                "full_name",
+                "item_type",
+                "item_description",
+                "appraised_value",
+                "item_status",
+            ],
+        )
+
+    @patch("llm_chat._execute_tool_call")
+    def test_sql_shape_aggregate_ranking_is_compact(self, mock_execute_tool):
+        ranking_sql = (
+            "SELECT c.customer_id, c.full_name, "
+            "SUM(p.amount_due - p.amount_paid) AS total_overdue "
+            "FROM customers c "
+            "JOIN loans l ON c.customer_id = l.customer_id "
+            "JOIN payments p ON l.loan_id = p.loan_id "
+            "GROUP BY c.customer_id, c.full_name "
+            "ORDER BY total_overdue DESC "
+            "LIMIT 1"
+        )
+        mock_execute_tool.return_value = {
+            "success": True,
+            "rows": [{"customer_id": 1, "full_name": "Asha Patel", "total_overdue": 2400.0}],
+            "row_count": 1,
+        }
+        responses = [
+            _make_gemini_response(
+                function_calls=[_make_function_call("execute_safe_sql", {"sql": ranking_sql})]
+            ),
+            _make_gemini_response(text="Asha Patel owes the most."),
+        ]
+        with _patch_gemini_responses(responses):
+            result = llm_chat.chat("Which customer owes the most?")
+        sql = _execute_sql_from_result(result).lower()
+        self.assertIn("total_overdue", sql)
+        self.assertIn("order by", sql)
+        self.assertIn("limit", sql)
+        self.assertNotIn("item_description", sql)
+        self.assertNotIn("appraised_value", sql)
+
+    @patch("llm_chat._execute_tool_call")
+    def test_sql_shape_aggregate_summary_is_compact(self, mock_execute_tool):
+        summary_sql = (
+            "SELECT SUM(amount_due - amount_paid) AS total_overdue "
+            "FROM payments "
+            "WHERE due_date < CURDATE() AND amount_paid < amount_due"
+        )
+        mock_execute_tool.return_value = {
+            "success": True,
+            "rows": [{"total_overdue": 5200.0}],
+            "row_count": 1,
+        }
+        responses = [
+            _make_gemini_response(
+                function_calls=[_make_function_call("execute_safe_sql", {"sql": summary_sql})]
+            ),
+            _make_gemini_response(text="Total overdue is $5,200.00."),
+        ]
+        with _patch_gemini_responses(responses):
+            result = llm_chat.chat("What is the total overdue amount?")
+        sql = _execute_sql_from_result(result).lower()
+        self.assertIn("sum(", sql)
+        self.assertIn("total_overdue", sql)
+        self.assertNotIn("group by", sql)
+        self.assertNotIn("full_name", sql)
 
     @patch("llm_chat._execute_tool_call")
     def test_how_many_missed_payments_uses_execute_safe_sql(self, mock_execute_tool):
@@ -332,7 +637,7 @@ class ChatRoutingTests(unittest.TestCase):
             "row_count": 1,
         }
         count_sql = (
-            "SELECT COUNT(*) AS missed_payment_count "
+            "SELECT COUNT(payment_id) AS missed_payment_count "
             "FROM payments "
             "WHERE due_date < CURDATE() AND amount_paid < amount_due"
         )

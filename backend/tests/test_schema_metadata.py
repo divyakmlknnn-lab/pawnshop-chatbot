@@ -6,6 +6,7 @@ from schema_metadata import (
     describe_approved_table,
     get_approved_schema,
     list_approved_tables,
+    list_projection_profiles,
 )
 
 
@@ -142,6 +143,100 @@ class SchemaMetadataTests(unittest.TestCase):
         schema = get_approved_schema()
         self.assertEqual(schema["restricted_contact_fields"], ["email", "phone"])
 
+    def test_projection_profiles_exist_with_required_fields(self):
+        expected = {
+            "customer_list": ["customer_id", "full_name"],
+            "customer_detail": [
+                "customer_id",
+                "full_name",
+                "loan_type",
+                "current_balance",
+                "collateral_value",
+                "ltv_percent",
+                "next_due_date",
+                "amount_due",
+                "amount_paid",
+                "remaining_due",
+                "due_date",
+                "item_type",
+                "item_description",
+                "appraised_value",
+                "item_status",
+            ],
+            "overdue_payments": [
+                "customer_id",
+                "full_name",
+                "loan_type",
+                "amount_due",
+                "amount_paid",
+                "remaining_due",
+                "due_date",
+                "ltv_percent",
+            ],
+            "due_soon": [
+                "customer_id",
+                "full_name",
+                "loan_type",
+                "amount_due",
+                "amount_paid",
+                "remaining_due",
+                "due_date",
+            ],
+            "high_risk_loans": [
+                "customer_id",
+                "full_name",
+                "loan_type",
+                "current_balance",
+                "collateral_value",
+                "ltv_percent",
+                "next_due_date",
+            ],
+            "collateral_detail": [
+                "customer_id",
+                "full_name",
+                "item_type",
+                "item_description",
+                "appraised_value",
+                "item_status",
+            ],
+            "aggregate_ranking": ["customer_id", "full_name"],
+            "aggregate_summary": [],
+        }
+
+        profiles = {profile["name"]: profile for profile in list_projection_profiles()}
+        self.assertEqual(set(profiles), set(expected))
+
+        for name, fields in expected.items():
+            profile = profiles[name]
+            self.assertEqual(profile["recommended_fields"], fields)
+            self.assertTrue(profile["exclude_contact_fields_unless_requested"])
+            self.assertTrue(profile["category"])
+            self.assertTrue(profile["related_tables"])
+            self.assertIn("phone", profile["notes"].lower())
+            self.assertIn("email", profile["notes"].lower())
+
+        self.assertIn("total_overdue", profiles["aggregate_ranking"]["computed_aliases"])
+        self.assertIn("remaining_due", profiles["overdue_payments"]["computed_aliases"])
+        self.assertIn("ltv_percent", profiles["high_risk_loans"]["computed_aliases"])
+
+    def test_get_approved_schema_includes_projection_profiles(self):
+        schema = get_approved_schema()
+        self.assertIn("projection_profiles", schema)
+        names = [profile["name"] for profile in schema["projection_profiles"]]
+        self.assertEqual(
+            names,
+            [
+                "customer_list",
+                "customer_detail",
+                "overdue_payments",
+                "due_soon",
+                "high_risk_loans",
+                "collateral_detail",
+                "aggregate_ranking",
+                "aggregate_summary",
+            ],
+        )
+
     def test_unknown_table_rejection(self):
         with self.assertRaises(UnknownTableError):
             describe_approved_table("not_a_table")
@@ -183,11 +278,13 @@ class SchemaMetadataTests(unittest.TestCase):
         schema["tables"]["customers"]["fields"].append("hacked")
         schema["relationships"].append({"from_table": "bad"})
         schema["computed_fields"][0]["name"] = "changed"
+        schema["projection_profiles"][0]["recommended_fields"].append("hacked")
 
         fresh = get_approved_schema()
         self.assertNotIn("hacked", fresh["tables"]["customers"]["fields"])
         self.assertEqual(len(fresh["relationships"]), 4)
         self.assertEqual(fresh["computed_fields"][0]["name"], "remaining_due")
+        self.assertNotIn("hacked", fresh["projection_profiles"][0]["recommended_fields"])
 
         again = get_approved_schema()
         self.assertEqual(again, fresh)
