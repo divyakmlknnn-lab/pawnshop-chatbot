@@ -234,6 +234,59 @@ class AuthTests(unittest.TestCase):
         finally:
             os.environ["AUTH_REQUIRED"] = "0"
 
+    def test_options_preflight_bypasses_auth_gate_when_required(self):
+        os.environ["AUTH_REQUIRED"] = "1"
+        try:
+            chat_preflight = self.client.options(
+                "/chat",
+                headers={
+                    "Origin": "http://127.0.0.1:8000",
+                    "Access-Control-Request-Method": "POST",
+                    "Access-Control-Request-Headers": "content-type",
+                },
+            )
+            dash_preflight = self.client.options(
+                "/dashboard/stats",
+                headers={
+                    "Origin": "http://127.0.0.1:8000",
+                    "Access-Control-Request-Method": "GET",
+                    "Access-Control-Request-Headers": "content-type",
+                },
+            )
+            self.assertIn(chat_preflight.status_code, {200, 204})
+            self.assertIn(dash_preflight.status_code, {200, 204})
+
+            # Real protected methods still require a session.
+            self.assertEqual(
+                self.client.post(
+                    "/chat",
+                    json={"message": "Hello", "history": []},
+                ).status_code,
+                401,
+            )
+            self.assertEqual(self.client.get("/dashboard/stats").status_code, 401)
+        finally:
+            os.environ["AUTH_REQUIRED"] = "0"
+
+    @patch("app.chat", return_value={"reply": "ok", "history_text": "ok"})
+    def test_authenticated_chat_still_works_when_auth_required(self, mock_chat):
+        os.environ["AUTH_REQUIRED"] = "1"
+        try:
+            login = self.client.post(
+                "/auth/login",
+                json={"username": "store1_user_a", "password": "demo-store1-pass"},
+            )
+            self.assertEqual(login.status_code, 200)
+            response = self.client.post(
+                "/chat",
+                json={"message": "Hello", "history": []},
+            )
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.get_json()["reply"], "ok")
+            mock_chat.assert_called_once_with("Hello", [], store_id=1)
+        finally:
+            os.environ["AUTH_REQUIRED"] = "0"
+
 
 class SessionCookieConfigTests(unittest.TestCase):
     """SESSION_COOKIE_SAMESITE / SECURE resolution (no live MySQL)."""

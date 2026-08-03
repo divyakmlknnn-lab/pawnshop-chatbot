@@ -79,6 +79,34 @@ class CredentialedCorsTests(unittest.TestCase):
             "true",
         )
 
+    def test_protected_path_preflight_succeeds_with_auth_required(self):
+        os.environ["AUTH_REQUIRED"] = "1"
+        try:
+            for path, method in (("/chat", "POST"), ("/dashboard/stats", "GET")):
+                response = self.client.options(
+                    path,
+                    headers={
+                        "Origin": "http://127.0.0.1:8000",
+                        "Access-Control-Request-Method": method,
+                        "Access-Control-Request-Headers": "content-type",
+                    },
+                )
+                self.assertIn(response.status_code, {200, 204}, path)
+                self.assertEqual(
+                    response.headers.get("Access-Control-Allow-Origin"),
+                    "http://127.0.0.1:8000",
+                )
+                self.assertEqual(
+                    response.headers.get("Access-Control-Allow-Credentials"),
+                    "true",
+                )
+                self.assertNotEqual(
+                    response.headers.get("Access-Control-Allow-Origin"),
+                    "*",
+                )
+        finally:
+            os.environ["AUTH_REQUIRED"] = "0"
+
 
 if __name__ == "__main__":
     unittest.main()

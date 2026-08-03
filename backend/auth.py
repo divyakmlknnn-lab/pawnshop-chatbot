@@ -201,14 +201,22 @@ def path_requires_auth(path: str) -> bool:
     return path in {"/chat", "/dashboard/stats"}
 
 
-def auth_gate_response(path: str):
-    """Return a 401 Flask response when AUTH_REQUIRED and identity is missing."""
+def auth_gate_response(path: str, method: str | None = None):
+    """Return a 401 Flask response when AUTH_REQUIRED and identity is missing.
+
+    CORS preflight OPTIONS must not be blocked; Flask-CORS handles those.
+    Authenticated checks still apply to POST/GET/etc. on protected paths.
+    """
+    from flask import jsonify, request
+
     if not auth_required_enabled():
+        return None
+    resolved_method = (method or request.method or "").upper()
+    if resolved_method == "OPTIONS":
         return None
     if not path_requires_auth(path):
         return None
     if getattr(g, "current_user", None):
         return None
-    from flask import jsonify
 
     return jsonify({"error": "Authentication required."}), 401
