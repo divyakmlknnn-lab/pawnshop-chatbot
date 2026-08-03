@@ -28,7 +28,25 @@ from tenant_sql import parse_trusted_store_id, tenancy_enforcement_enabled
 app = Flask(__name__)
 app.config["JSON_AS_ASCII"] = False
 configure_session(app)
-CORS(app)
+
+
+def _cors_allowed_origins() -> list[str]:
+    """Explicit browser origins allowed to send credentialed requests.
+
+    Never defaults to '*': credentialed CORS requires concrete origins.
+    """
+    raw = os.environ.get(
+        "CORS_ORIGINS",
+        "http://127.0.0.1:8000,http://localhost:8000",
+    )
+    return [origin.strip() for origin in raw.split(",") if origin.strip()]
+
+
+CORS(
+    app,
+    origins=_cors_allowed_origins(),
+    supports_credentials=True,
+)
 
 
 @app.before_request

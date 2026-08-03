@@ -53,6 +53,11 @@ def configure_session(app: Flask) -> None:
     app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=8)
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+    # Local HTTP POC: Secure cookies would block session on http://127.0.0.1.
+    # Production/cross-site HTTPS cookie policy is a later deployment change.
+    app.config["SESSION_COOKIE_SECURE"] = os.environ.get(
+        "SESSION_COOKIE_SECURE", "0"
+    ).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def hash_password(password: str) -> str:
