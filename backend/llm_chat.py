@@ -31,7 +31,12 @@ from projection_profiles import enrich_select_projection
 try:
     from pawnshop_mcp.client import call_mcp_tool
 except ImportError:  # pragma: no cover - optional until MCP package is deployed
-    def call_mcp_tool(tool_name: str, arguments: dict | None = None) -> dict:
+    def call_mcp_tool(
+        tool_name: str,
+        arguments: dict | None = None,
+        *,
+        trusted_store_id=None,
+    ) -> dict:
         return {"success": False, "error": "MCP is not available."}
 
 from tools import (
@@ -336,12 +341,36 @@ def _can_execute_operationally(classification: IntentClassification) -> bool:
     return True
 
 
-def _call_mcp_tool_safe(tool_name: str, tool_args: dict) -> dict:
+def _call_mcp_tool_safe(
+    tool_name: str,
+    tool_args: dict,
+    *,
+    trusted_store_id=None,
+) -> dict:
     try:
-        return call_mcp_tool(tool_name, tool_args)
+        return call_mcp_tool(
+            tool_name,
+            tool_args,
+            trusted_store_id=trusted_store_id,
+        )
     except Exception:
         logger.exception("MCP tool execution failed for %s", tool_name)
         return {"success": False, "error": "MCP tool execution failed."}
+
+
+def _sanitize_mcp_tool_args(tool_name: str, tool_args: dict) -> dict:
+    """Drop any client/Gemini-supplied store identity from MCP tool arguments."""
+    if tool_args is None:
+        tool_args = {}
+    tool_args.pop("store_id", None)
+    tool_args.pop("trusted_store_id", None)
+    if tool_name == "execute_safe_sql":
+        # execute_safe_sql accepts only sql from the model.
+        sql = tool_args.get("sql")
+        tool_args.clear()
+        if sql is not None:
+            tool_args["sql"] = sql
+    return tool_args
 
 
 def _execute_tool_call(
@@ -350,7 +379,10 @@ def _execute_tool_call(
     *,
     classification: IntentClassification | None = None,
     user_message: str = "",
+    trusted_store_id=None,
 ):
+    tool_args = _sanitize_mcp_tool_args(tool_name, tool_args)
+
     if tool_name == "execute_safe_sql" and classification is not None:
         original_sql = (tool_args.get("sql") or "").strip()
         enrichment = enrich_select_projection(
@@ -371,13 +403,21 @@ def _execute_tool_call(
                 enrichment.profile,
                 enrichment.reason,
             )
-        result = _call_mcp_tool_safe(tool_name, tool_args)
+        result = _call_mcp_tool_safe(
+            tool_name,
+            tool_args,
+            trusted_store_id=trusted_store_id,
+        )
         if isinstance(result, dict):
             result["projection_enrichment"] = enrichment.to_dict()
         return result
 
     if tool_name in MCP_TOOL_NAMES:
-        return _call_mcp_tool_safe(tool_name, tool_args)
+        return _call_mcp_tool_safe(
+            tool_name,
+            tool_args,
+            trusted_store_id=trusted_store_id,
+        )
     return {
         "success": False,
         "error": f"Tool '{tool_name}' is not available in the chat flow.",
@@ -853,7 +893,13 @@ def _handle_gemini_failure(
     return _gemini_fallback_response(message, classification, executions)
 
 
-def _chat_with_gemini(message: str, history: list | None, classification: IntentClassification) -> dict:
+def _chat_with_gemini(
+    message: str,
+    history: list | None,
+    classification: IntentClassification,
+    *,
+    trusted_store_id=None,
+) -> dict:
     contents = _build_gemini_contents(message, history)
     config = _gemini_generate_config(classification)
     tools_used = []
@@ -900,6 +946,7 @@ def _chat_with_gemini(message: str, history: list | None, classification: Intent
                     tool_args,
                     classification=classification,
                     user_message=message,
+                    trusted_store_id=trusted_store_id,
                 )
                 tools_used.append({"tool": tool_name, "args": tool_args})
                 executions.append((tool_name, tool_args, tool_result))
@@ -960,13 +1007,29 @@ def _execute_operational_if_ready(message: str, classification: IntentClassifica
     return _execute_classification(message, classification)
 
 
-def chat(message: str, history: list | None = None) -> dict:
+def chat(
+    message: str,
+    history: list | None = None,
+    *,
+    store_id=None,
+) -> dict:
+    """Run chat orchestration.
+
+    ``store_id`` is a trusted Python parameter from the authenticated Flask
+    session / ``g.store_id``. It is never read from user JSON or Gemini tool
+    arguments.
+    """
     classification = classify_intent(message)
     _log_routing(message, classification)
 
     logger.info("[CHAT] Route: Gemini orchestration")
     try:
-        result = _chat_with_gemini(message, history, classification)
+        result = _chat_with_gemini(
+            message,
+            history,
+            classification,
+            trusted_store_id=store_id,
+        )
     except ValueError:
         result = _message_html(
             "Gemini is not configured. Add GEMINI_API_KEY to enable chat.",

@@ -3,7 +3,7 @@ import os
 import sys
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, request
+from flask import Flask, g, jsonify, request
 from flask_cors import CORS
 
 load_dotenv()
@@ -107,8 +107,11 @@ def chat_endpoint():
         return jsonify({"error": "message is required"}), 400
 
     try:
-        # Phase 2: do not pass store_id / user identity into chat yet.
-        result = chat(message, history)
+        # Trusted store identity from authenticated session / g only.
+        # Never accept store_id from request JSON (Gemini must never control it).
+        body.pop("store_id", None)
+        trusted_store_id = getattr(g, "store_id", None)
+        result = chat(message, history, store_id=trusted_store_id)
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500

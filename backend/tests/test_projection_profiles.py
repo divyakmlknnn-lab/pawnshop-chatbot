@@ -267,9 +267,10 @@ class ExecutePathEnrichmentIntegrationTests(unittest.TestCase):
         }
         captured = {}
 
-        def fake_mcp(tool_name, tool_args_inner):
+        def fake_mcp(tool_name, tool_args_inner, *, trusted_store_id=None):
             captured["tool"] = tool_name
             captured["sql"] = tool_args_inner.get("sql")
+            captured["trusted_store_id"] = trusted_store_id
             return {
                 "success": True,
                 "rows": [],

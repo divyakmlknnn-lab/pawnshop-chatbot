@@ -91,6 +91,20 @@ _ON_CONDITION = re.compile(
     rf"^{_IDENTIFIER}\.{_IDENTIFIER}\s*=\s*{_IDENTIFIER}\.{_IDENTIFIER}$",
     re.IGNORECASE,
 )
+# Server-only: allow injected alias.store_id = <positive int> after the join equality.
+_TENANT_STORE_ID_PREDICATE = re.compile(
+    rf"^{_IDENTIFIER}\.store_id\s*=\s*(?P<store_id>[1-9]\d*)$",
+    re.IGNORECASE,
+)
+_TENANT_BUSINESS_TABLES: frozenset[str] = frozenset(
+    {
+        "customers",
+        "accounts",
+        "loans",
+        "payments",
+        "collateral_items",
+    }
+)
 _LIMIT_TRAILING = re.compile(
     r"\s+LIMIT\s+(?P<limit>\S+)(?:\s+OFFSET\s+(?P<offset>\S+))?\s*(?:;)?\s*$",
     re.IGNORECASE,
@@ -558,12 +572,27 @@ def _collect_physical_columns_from_expression(
                 columns_used.add(token)
 
 
+def _is_allowed_tenant_store_id_column(
+    column_name: str,
+    resolved_table: str,
+    *,
+    allow_tenant_predicates: bool,
+) -> bool:
+    return (
+        allow_tenant_predicates
+        and column_name == "store_id"
+        and resolved_table in _TENANT_BUSINESS_TABLES
+    )
+
+
 def _validate_clause_columns(
     clause: str,
     table_names: set[str],
     alias_map: dict[str, str],
     columns_used: set[str],
     select_aliases: set[str] | None = None,
+    *,
+    allow_tenant_predicates: bool = False,
 ) -> str | None:
     select_aliases = select_aliases or set()
     for match in _QUALIFIED_COLUMN.finditer(clause):
@@ -573,7 +602,12 @@ def _validate_clause_columns(
         if resolved_table is None:
             return f"Unknown table reference: {table_ref}"
         if column_name not in _TABLE_FIELDS[resolved_table]:
-            return f"Unknown column: {resolved_table}.{column_name}"
+            if not _is_allowed_tenant_store_id_column(
+                column_name,
+                resolved_table,
+                allow_tenant_predicates=allow_tenant_predicates,
+            ):
+                return f"Unknown column: {resolved_table}.{column_name}"
         columns_used.add(column_name)
 
     if len(table_names) == 1:
@@ -583,6 +617,12 @@ def _validate_clause_columns(
             if token in select_aliases:
                 continue
             if token in _TABLE_FIELDS[only_table]:
+                columns_used.add(token)
+            elif token == "store_id" and _is_allowed_tenant_store_id_column(
+                token,
+                only_table,
+                allow_tenant_predicates=allow_tenant_predicates,
+            ):
                 columns_used.add(token)
             elif token in _COMPUTED_EXPRESSIONS:
                 return f"Computed field '{token}' must use an approved expression."
@@ -630,6 +670,59 @@ def _validate_clause_columns(
     return None
 
 
+def _validate_join_on_clause(
+    on_clause: str,
+    tables_used: set[str],
+    alias_map: dict[str, str],
+    columns_used: set[str],
+    *,
+    allow_tenant_predicates: bool,
+) -> str | None:
+    """Validate JOIN ON: single approved equality, optionally plus tenant predicates."""
+    normalized = _normalize_whitespace(on_clause)
+    parts = [part.strip() for part in re.split(r"\s+AND\s+", normalized, flags=re.IGNORECASE)]
+    if not parts or not parts[0]:
+        return "JOIN conditions must use a single approved equality predicate."
+
+    on_match = _ON_CONDITION.match(parts[0])
+    if on_match is None:
+        return "JOIN conditions must use a single approved equality predicate."
+
+    left_table = _resolve_table_name(on_match.group(1), alias_map, tables_used)
+    left_column = on_match.group(2).lower()
+    right_table = _resolve_table_name(on_match.group(3), alias_map, tables_used)
+    right_column = on_match.group(4).lower()
+
+    if left_table is None or right_table is None:
+        return "JOIN references an unknown table alias."
+    if left_column not in _TABLE_FIELDS[left_table]:
+        return f"Unknown column: {left_table}.{left_column}"
+    if right_column not in _TABLE_FIELDS[right_table]:
+        return f"Unknown column: {right_table}.{right_column}"
+    if not _relationship_is_approved(left_table, left_column, right_table, right_column):
+        return "JOIN is not an approved relationship."
+    columns_used.update({left_column, right_column})
+
+    extra_parts = parts[1:]
+    if not extra_parts:
+        return None
+    if not allow_tenant_predicates:
+        return "JOIN conditions must use a single approved equality predicate."
+
+    for part in extra_parts:
+        tenant_match = _TENANT_STORE_ID_PREDICATE.match(part)
+        if tenant_match is None:
+            return "JOIN conditions must use a single approved equality predicate."
+        alias = tenant_match.group(1).lower()
+        resolved = _resolve_table_name(alias, alias_map, tables_used)
+        if resolved is None:
+            return "JOIN references an unknown table alias."
+        if resolved not in _TENANT_BUSINESS_TABLES:
+            return f"Unknown column: {resolved}.store_id"
+        columns_used.add("store_id")
+    return None
+
+
 def _contains_restricted_contact_fields(columns_used: set[str]) -> bool:
     return bool(columns_used.intersection(_RESTRICTED_CONTACT_FIELDS))
 
@@ -657,8 +750,19 @@ def _apply_limit(normalized_sql: str) -> tuple[str | None, str | None]:
     return f"{base_sql} LIMIT {limit_value}", None
 
 
-def validate_readonly_sql(sql: str, *, allow_contact_fields: bool = False) -> dict[str, Any]:
-    """Validate a single read-only SELECT statement against approved schema metadata."""
+def validate_readonly_sql(
+    sql: str,
+    *,
+    allow_contact_fields: bool = False,
+    allow_tenant_predicates: bool = False,
+) -> dict[str, Any]:
+    """Validate a single read-only SELECT statement against approved schema metadata.
+
+    ``allow_tenant_predicates`` is server-only. It permits qualified
+    ``alias.store_id = <positive int>`` predicates injected by the tenant gate
+    in WHERE / JOIN ON. It does not expose ``store_id`` in public schema
+    metadata or make it generally selectable for Gemini.
+    """
     if sql is None or not str(sql).strip():
         return _validation_result(valid=False, reason="SQL must not be blank.")
 
@@ -755,45 +859,19 @@ def validate_readonly_sql(sql: str, *, allow_contact_fields: bool = False) -> di
         tables_used.add(join_table)
         alias_map[join_alias] = join_table
 
-        on_clause = _normalize_whitespace(join_match.group("on"))
-        on_match = _ON_CONDITION.match(on_clause)
-        if on_match is None:
+        on_error = _validate_join_on_clause(
+            join_match.group("on"),
+            tables_used,
+            alias_map,
+            columns_used,
+            allow_tenant_predicates=allow_tenant_predicates,
+        )
+        if on_error:
             return _validation_result(
                 valid=False,
-                reason="JOIN conditions must use a single approved equality predicate.",
+                reason=on_error,
                 tables_used=sorted(tables_used),
             )
-
-        left_table = _resolve_table_name(on_match.group(1), alias_map, tables_used)
-        left_column = on_match.group(2).lower()
-        right_table = _resolve_table_name(on_match.group(3), alias_map, tables_used)
-        right_column = on_match.group(4).lower()
-
-        if left_table is None or right_table is None:
-            return _validation_result(
-                valid=False,
-                reason="JOIN references an unknown table alias.",
-                tables_used=sorted(tables_used),
-            )
-        if left_column not in _TABLE_FIELDS[left_table]:
-            return _validation_result(
-                valid=False,
-                reason=f"Unknown column: {left_table}.{left_column}",
-                tables_used=sorted(tables_used),
-            )
-        if right_column not in _TABLE_FIELDS[right_table]:
-            return _validation_result(
-                valid=False,
-                reason=f"Unknown column: {right_table}.{right_column}",
-                tables_used=sorted(tables_used),
-            )
-        if not _relationship_is_approved(left_table, left_column, right_table, right_column):
-            return _validation_result(
-                valid=False,
-                reason="JOIN is not an approved relationship.",
-                tables_used=sorted(tables_used),
-            )
-        columns_used.update({left_column, right_column})
 
     for select_item in _split_select_list(select_clause):
         error = _validate_select_item(
@@ -827,6 +905,7 @@ def validate_readonly_sql(sql: str, *, allow_contact_fields: bool = False) -> di
                     alias_map,
                     columns_used,
                     select_aliases,
+                    allow_tenant_predicates=allow_tenant_predicates,
                 )
                 if error:
                     return _validation_result(

@@ -203,7 +203,7 @@ class AuthTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()["reply"], "ok")
-        mock_chat.assert_called_once_with("Hello", [])
+        mock_chat.assert_called_once_with("Hello", [], store_id=None)
 
     @patch("app.get_dashboard_stats", return_value={"total_customers": 5})
     def test_dashboard_remains_accessible_when_auth_required_off(self, mock_stats):
