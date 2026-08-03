@@ -62,6 +62,56 @@ class SqlValidationValidTests(unittest.TestCase):
         self.assertIn("amount_due", result["columns_used"])
         self.assertIn("amount_paid", result["columns_used"])
 
+    def test_parenthesized_ltv_percent_expression(self):
+        sql = (
+            "SELECT (l.current_balance / NULLIF(l.collateral_value, 0) * 100) "
+            "AS ltv_percent "
+            "FROM loans l LIMIT 10"
+        )
+        result = validate_readonly_sql(sql)
+        self.assertTrue(result["valid"], result["reason"])
+        self.assertIn("ltv_percent", result["columns_used"])
+
+    def test_nested_parentheses_ltv_percent_expression(self):
+        sql = (
+            "SELECT ((l.current_balance / NULLIF(l.collateral_value, 0) * 100)) "
+            "AS ltv_percent "
+            "FROM loans l LIMIT 10"
+        )
+        result = validate_readonly_sql(sql)
+        self.assertTrue(result["valid"], result["reason"])
+        self.assertIn("ltv_percent", result["columns_used"])
+
+    def test_parenthesized_remaining_due_expression(self):
+        sql = (
+            "SELECT (p.amount_due - p.amount_paid) AS remaining_due "
+            "FROM payments p LIMIT 10"
+        )
+        result = validate_readonly_sql(sql)
+        self.assertTrue(result["valid"], result["reason"])
+        self.assertIn("remaining_due", result["columns_used"])
+        self.assertIn("amount_due", result["columns_used"])
+        self.assertIn("amount_paid", result["columns_used"])
+
+    def test_priya_style_parenthesized_computeds_with_left_joins(self):
+        sql = (
+            "SELECT c.customer_id, c.full_name, l.loan_type, "
+            "l.current_balance, l.collateral_value, "
+            "(l.current_balance / NULLIF(l.collateral_value, 0) * 100) AS ltv_percent, "
+            "l.next_due_date, p.amount_due, p.amount_paid, "
+            "(p.amount_due - p.amount_paid) AS remaining_due, p.due_date, "
+            "ci.item_type, ci.item_description, ci.appraised_value, ci.item_status "
+            "FROM customers AS c "
+            "LEFT JOIN loans AS l ON c.customer_id = l.customer_id "
+            "LEFT JOIN payments AS p ON l.loan_id = p.loan_id "
+            "LEFT JOIN collateral_items AS ci ON l.loan_id = ci.loan_id "
+            "WHERE c.full_name = 'Priya Nair'"
+        )
+        result = validate_readonly_sql(sql)
+        self.assertTrue(result["valid"], result["reason"])
+        self.assertIn("ltv_percent", result["columns_used"])
+        self.assertIn("remaining_due", result["columns_used"])
+
     def test_sum_approved_column(self):
         sql = "SELECT SUM(current_balance) AS total_balance FROM loans"
         result = validate_readonly_sql(sql)

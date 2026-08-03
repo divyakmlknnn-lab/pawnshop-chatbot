@@ -171,6 +171,144 @@
             margin: 0 6px;
         }
 
+        .header-user {
+            display: none;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 6px;
+            font-size: 12px;
+            color: #e8dfd0;
+        }
+
+        .header-user.visible {
+            display: flex;
+        }
+
+        .header-user-name {
+            font-weight: 650;
+            color: #fffdf8;
+        }
+
+        .header-user-store {
+            color: var(--color-gold-light);
+            font-weight: 600;
+        }
+
+        .logout-btn {
+            border: 1px solid rgba(212, 175, 55, 0.35);
+            background: rgba(255, 255, 255, 0.06);
+            color: #f5f0e6;
+            border-radius: 999px;
+            padding: 6px 12px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: var(--transition-fast);
+        }
+
+        .logout-btn:hover {
+            background: rgba(212, 175, 55, 0.16);
+            border-color: rgba(212, 175, 55, 0.55);
+        }
+
+        .login-gate {
+            display: none;
+            max-width: 440px;
+            margin: 48px auto;
+            background: var(--color-cream-card);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-soft);
+            padding: 28px 28px 24px;
+        }
+
+        .login-gate.visible {
+            display: block;
+        }
+
+        .login-gate h2 {
+            margin: 0 0 6px;
+            font-size: 22px;
+            color: var(--color-charcoal);
+            letter-spacing: -0.02em;
+        }
+
+        .login-gate .login-sub {
+            margin: 0 0 20px;
+            color: var(--color-text-muted);
+            font-size: 14px;
+        }
+
+        .login-field {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            margin-bottom: 14px;
+        }
+
+        .login-field label {
+            font-size: 12px;
+            font-weight: 650;
+            color: var(--color-brown);
+            letter-spacing: 0.02em;
+        }
+
+        .login-field input {
+            border: 1px solid var(--color-border-strong);
+            border-radius: var(--radius-sm);
+            padding: 11px 12px;
+            font-size: 14px;
+            background: #fff;
+            color: var(--color-text);
+        }
+
+        .login-field input:focus {
+            outline: 2px solid rgba(184, 146, 42, 0.35);
+            border-color: var(--color-gold);
+        }
+
+        .login-error {
+            display: none;
+            margin: 0 0 12px;
+            padding: 10px 12px;
+            border-radius: var(--radius-sm);
+            background: rgba(185, 28, 28, 0.08);
+            border: 1px solid rgba(185, 28, 28, 0.22);
+            color: var(--color-overdue);
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .login-error.visible {
+            display: block;
+        }
+
+        .login-submit {
+            width: 100%;
+            border: none;
+            border-radius: var(--radius-sm);
+            background: linear-gradient(135deg, var(--color-charcoal-deep), var(--color-charcoal));
+            color: #fffdf8;
+            font-weight: 700;
+            font-size: 14px;
+            padding: 12px 14px;
+            cursor: pointer;
+            border-bottom: 3px solid var(--color-gold);
+        }
+
+        .login-submit:hover {
+            filter: brightness(1.05);
+        }
+
+        .login-submit:disabled {
+            opacity: 0.65;
+            cursor: wait;
+        }
+
+        .app-shell.hidden {
+            display: none;
+        }
+
         .header-desc {
             margin: 10px 0 0;
             font-size: 15px;
@@ -1452,7 +1590,24 @@
 
 <body>
 
-<div class="container">
+<div id="loginGate" class="login-gate" aria-live="polite">
+    <h2>Sign in to TellerIQ</h2>
+    <p class="login-sub">Use your store operator account. Store identity comes from your authenticated session.</p>
+    <div id="loginError" class="login-error" role="alert"></div>
+    <form id="loginForm" autocomplete="on">
+        <div class="login-field">
+            <label for="loginUsername">Username</label>
+            <input id="loginUsername" name="username" type="text" autocomplete="username" required>
+        </div>
+        <div class="login-field">
+            <label for="loginPassword">Password</label>
+            <input id="loginPassword" name="password" type="password" autocomplete="current-password" required>
+        </div>
+        <button class="login-submit" id="loginSubmit" type="submit">Sign in</button>
+    </form>
+</div>
+
+<div id="appShell" class="container app-shell hidden">
     <div class="header">
         <div class="header-top">
             <div class="header-brand">
@@ -1472,6 +1627,11 @@
                 <span class="header-tag" id="portfolioStatus">
                     Portfolio Status<span class="header-tag-divider">|</span><span id="headerDate"></span>
                 </span>
+                <div id="headerUser" class="header-user">
+                    <span id="headerUserName" class="header-user-name"></span>
+                    <span id="headerUserStore" class="header-user-store"></span>
+                    <button type="button" class="logout-btn" id="logoutBtn">Sign out</button>
+                </div>
             </div>
         </div>
     </div>
@@ -1560,13 +1720,247 @@
 </div>
 
 <script>
-const API_BASE = "https://telleriq-backend.onrender.com";
-const CHAT_STORAGE_KEY = "telleriq.chat.v1";
+const PROD_API_BASE = "https://telleriq-backend.onrender.com";
+const LOCAL_API_BASE = "http://127.0.0.1:5000";
+const CHAT_STORAGE_PREFIX = "telleriq.chat.v1";
 const MAX_HISTORY_MESSAGES = 20;
 const MAX_UI_TURNS = 10;
 let conversationHistory = [];
 let uiTurns = [];
+/** Safe profile from /auth/me or /auth/login only (never localStorage). */
+let currentUser = null;
 const DEBUG_MODE = new URLSearchParams(window.location.search).get("debug") === "1";
+
+function resolveApiBase() {
+    const host = window.location.hostname;
+    if (host === "127.0.0.1" || host === "localhost") {
+        return LOCAL_API_BASE;
+    }
+    return PROD_API_BASE;
+}
+
+const API_BASE = resolveApiBase();
+
+function chatStorageKey() {
+    if (!currentUser) {
+        return null;
+    }
+    const storeId = Number(currentUser.store_id);
+    const userId = Number(currentUser.user_id);
+    if (!Number.isInteger(storeId) || storeId <= 0 || !Number.isInteger(userId) || userId <= 0) {
+        return null;
+    }
+    return `${CHAT_STORAGE_PREFIX}.${storeId}.${userId}`;
+}
+
+function setLoginError(message) {
+    const el = document.getElementById("loginError");
+    if (!el) {
+        return;
+    }
+    if (!message) {
+        el.textContent = "";
+        el.classList.remove("visible");
+        return;
+    }
+    el.textContent = message;
+    el.classList.add("visible");
+}
+
+function showLoginGate(message) {
+    const gate = document.getElementById("loginGate");
+    const shell = document.getElementById("appShell");
+    if (gate) {
+        gate.classList.add("visible");
+    }
+    if (shell) {
+        shell.classList.add("hidden");
+    }
+    setLoginError(message || "");
+}
+
+function showAuthenticatedApp() {
+    const gate = document.getElementById("loginGate");
+    const shell = document.getElementById("appShell");
+    if (gate) {
+        gate.classList.remove("visible");
+    }
+    if (shell) {
+        shell.classList.remove("hidden");
+    }
+    setLoginError("");
+    updateHeaderUser();
+}
+
+function updateHeaderUser() {
+    const wrap = document.getElementById("headerUser");
+    const nameEl = document.getElementById("headerUserName");
+    const storeEl = document.getElementById("headerUserStore");
+    if (!wrap || !nameEl || !storeEl) {
+        return;
+    }
+    if (!currentUser) {
+        wrap.classList.remove("visible");
+        nameEl.textContent = "";
+        storeEl.textContent = "";
+        return;
+    }
+    nameEl.textContent = currentUser.display_name || currentUser.username || "Operator";
+    storeEl.textContent = currentUser.store_name || `Store ${currentUser.store_id}`;
+    wrap.classList.add("visible");
+}
+
+function clearInMemoryConversation() {
+    conversationHistory = [];
+    uiTurns = [];
+}
+
+function publicUserProfile(user) {
+    if (!user || typeof user !== "object") {
+        return null;
+    }
+    const storeId = Number(user.store_id);
+    const userId = Number(user.user_id);
+    if (!Number.isInteger(storeId) || storeId <= 0 || !Number.isInteger(userId) || userId <= 0) {
+        return null;
+    }
+    return {
+        user_id: userId,
+        store_id: storeId,
+        username: user.username || "",
+        display_name: user.display_name || user.username || "",
+        store_name: user.store_name || `Store ${storeId}`,
+    };
+}
+
+async function apiFetch(path, options = {}) {
+    const headers = { ...(options.headers || {}) };
+    const response = await fetch(`${API_BASE}${path}`, {
+        ...options,
+        credentials: "include",
+        headers,
+    });
+    if (
+        response.status === 401 &&
+        path !== "/auth/login" &&
+        path !== "/auth/me" &&
+        path !== "/auth/logout"
+    ) {
+        handleSessionExpired();
+    }
+    return response;
+}
+
+function handleSessionExpired() {
+    currentUser = null;
+    clearInMemoryConversation();
+    updateHeaderUser();
+    restoreEmptyState();
+    showLoginGate("Session expired. Please sign in again.");
+}
+
+async function enterAuthenticatedSession(user) {
+    const profile = publicUserProfile(user);
+    if (!profile) {
+        showLoginGate("Unable to establish a trusted session profile.");
+        return;
+    }
+    clearInMemoryConversation();
+    currentUser = profile;
+    showAuthenticatedApp();
+    loadConversation();
+    if (uiTurns.length) {
+        renderConversation();
+    } else {
+        restoreEmptyState();
+    }
+    await loadDashboardStats();
+}
+
+async function refreshAuthSession() {
+    try {
+        const response = await apiFetch("/auth/me", {
+            method: "GET",
+            headers: { Accept: "application/json" },
+        });
+        if (response.status === 401) {
+            currentUser = null;
+            clearInMemoryConversation();
+            showLoginGate("");
+            return false;
+        }
+        const payload = await response.json();
+        if (!response.ok || !payload.user) {
+            showLoginGate(payload.error || "Unable to verify session.");
+            return false;
+        }
+        await enterAuthenticatedSession(payload.user);
+        return true;
+    } catch (error) {
+        console.error(error);
+        showLoginGate("Unable to reach the backend. Is Flask running on port 5000?");
+        return false;
+    }
+}
+
+async function handleLoginSubmit(event) {
+    event.preventDefault();
+    const usernameInput = document.getElementById("loginUsername");
+    const passwordInput = document.getElementById("loginPassword");
+    const submitBtn = document.getElementById("loginSubmit");
+    const username = (usernameInput?.value || "").trim();
+    const password = passwordInput?.value || "";
+    if (!username || !password) {
+        setLoginError("Enter username and password.");
+        return;
+    }
+    if (submitBtn) {
+        submitBtn.disabled = true;
+    }
+    setLoginError("");
+    try {
+        const response = await apiFetch("/auth/login", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                Accept: "application/json",
+            },
+            body: JSON.stringify({ username, password }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload.user) {
+            setLoginError(payload.error || "Invalid username or password.");
+            return;
+        }
+        if (passwordInput) {
+            passwordInput.value = "";
+        }
+        await enterAuthenticatedSession(payload.user);
+    } catch (error) {
+        console.error(error);
+        setLoginError("Unable to reach the backend. Is Flask running on port 5000?");
+    } finally {
+        if (submitBtn) {
+            submitBtn.disabled = false;
+        }
+    }
+}
+
+async function handleLogout() {
+    try {
+        await apiFetch("/auth/logout", {
+            method: "POST",
+            headers: { Accept: "application/json" },
+        });
+    } catch (error) {
+        console.error(error);
+    }
+    currentUser = null;
+    clearInMemoryConversation();
+    updateHeaderUser();
+    restoreEmptyState();
+    showLoginGate("");
+}
 
 const EMPTY_STATE_HTML = `
                 <div class="empty-state" id="emptyState">
@@ -1728,9 +2122,13 @@ function toPersistedUiTurn(turn) {
 
 function saveConversation() {
     trimConversation();
+    const key = chatStorageKey();
+    if (!key) {
+        return;
+    }
     try {
         localStorage.setItem(
-            CHAT_STORAGE_KEY,
+            key,
             JSON.stringify({
                 history: conversationHistory,
                 // Persist only safe chat fields; never store queryDetails/SQL/rows.
@@ -1745,8 +2143,12 @@ function saveConversation() {
 function loadConversation() {
     conversationHistory = [];
     uiTurns = [];
+    const key = chatStorageKey();
+    if (!key) {
+        return;
+    }
     try {
-        const raw = localStorage.getItem(CHAT_STORAGE_KEY);
+        const raw = localStorage.getItem(key);
         if (!raw) {
             return;
         }
@@ -1776,10 +2178,13 @@ function restoreEmptyState() {
 function clearConversation() {
     conversationHistory = [];
     uiTurns = [];
-    try {
-        localStorage.removeItem(CHAT_STORAGE_KEY);
-    } catch (error) {
-        console.error("Unable to clear chat conversation:", error);
+    const key = chatStorageKey();
+    if (key) {
+        try {
+            localStorage.removeItem(key);
+        } catch (error) {
+            console.error("Unable to clear chat conversation:", error);
+        }
     }
     restoreEmptyState();
 }
@@ -2519,12 +2924,16 @@ function showTyping(question) {
 async function sendMessage(text) {
     const question = text.trim();
     if (!question) return;
+    if (!currentUser) {
+        showLoginGate("Session expired. Please sign in again.");
+        return;
+    }
 
     conversationHistory.push({ role: "user", content: question });
     showTyping(question);
 
     try {
-        const response = await fetch(`${API_BASE}/chat`, {
+        const response = await apiFetch("/chat", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -2532,6 +2941,11 @@ async function sendMessage(text) {
                 history: conversationHistory.slice(0, -1),
             }),
         });
+
+        if (response.status === 401) {
+            conversationHistory.pop();
+            return;
+        }
 
         const result = await response.json();
 
@@ -2610,6 +3024,9 @@ function setStatValue(elementId, value) {
 }
 
 async function loadDashboardStats() {
+    if (!currentUser) {
+        return;
+    }
     const statIds = ["statCustomers", "statOverdue", "statHighRisk", "statCollateral"];
     statIds.forEach((id) => {
         const element = document.getElementById(id);
@@ -2620,10 +3037,13 @@ async function loadDashboardStats() {
     });
 
     try {
-        const response = await fetch(`${API_BASE}/dashboard/stats`, {
+        const response = await apiFetch("/dashboard/stats", {
             method: "GET",
             headers: { "Accept": "application/json" },
         });
+        if (response.status === 401) {
+            return;
+        }
         const result = await response.json();
         if (!response.ok || result.error) {
             throw new Error(result.error || `HTTP ${response.status}`);
@@ -2649,11 +3069,16 @@ document.getElementById("userQuestion").addEventListener("keydown", (e) => {
 document.addEventListener("DOMContentLoaded", () => {
     setHeaderDate();
     startPlaceholderRotation();
-    loadDashboardStats();
-    loadConversation();
-    if (uiTurns.length) {
-        renderConversation();
+    const loginForm = document.getElementById("loginForm");
+    if (loginForm) {
+        loginForm.addEventListener("submit", handleLoginSubmit);
     }
+    const logoutBtn = document.getElementById("logoutBtn");
+    if (logoutBtn) {
+        logoutBtn.addEventListener("click", handleLogout);
+    }
+    showLoginGate("");
+    refreshAuthSession();
 });
 </script>
 

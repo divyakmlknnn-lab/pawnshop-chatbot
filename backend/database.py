@@ -118,11 +118,31 @@ def list_customers(limit: int = 50):
     )
 
 
-def get_customer_count():
+def _optional_trusted_store_id(store_id):
+    """Return a positive int store id, or None when scoping is not requested.
+
+    Invalid non-None values raise so a scoped call never silently becomes global.
+    """
+    if store_id is None:
+        return None
+    if isinstance(store_id, bool) or not isinstance(store_id, int) or store_id <= 0:
+        raise ValueError("store_id must be a positive integer.")
+    return store_id
+
+
+def get_customer_count(store_id=None):
+    trusted = _optional_trusted_store_id(store_id)
+    if trusted is None:
+        return run_traced_scalar(
+            "SELECT COUNT(*) AS count FROM customers",
+            (),
+            {"customers": ["customer_id"]},
+            "count",
+        )
     return run_traced_scalar(
-        "SELECT COUNT(*) AS count FROM customers",
-        (),
-        {"customers": ["customer_id"]},
+        "SELECT COUNT(*) AS count FROM customers WHERE store_id = %s",
+        (trusted,),
+        {"customers": ["customer_id", "store_id"]},
         "count",
     )
 
@@ -411,7 +431,19 @@ def get_due_this_week_customers():
     )
 
 
-def get_overdue_account_count():
+def get_overdue_account_count(store_id=None):
+    trusted = _optional_trusted_store_id(store_id)
+    if trusted is None:
+        return int(
+            run_scalar(
+                """
+                SELECT COUNT(*) AS overdue_count
+                FROM payments p
+                WHERE p.due_date < CURDATE()
+                  AND p.amount_paid < p.amount_due
+                """
+            )
+        )
     return int(
         run_scalar(
             """
@@ -419,7 +451,9 @@ def get_overdue_account_count():
             FROM payments p
             WHERE p.due_date < CURDATE()
               AND p.amount_paid < p.amount_due
-            """
+              AND p.store_id = %s
+            """,
+            (trusted,),
         )
     )
 
@@ -449,7 +483,26 @@ def get_missed_payments():
     return get_overdue_customers()
 
 
-def get_high_risk_loans(ltv_threshold: float = 75.0):
+def get_high_risk_loans(ltv_threshold: float = 75.0, store_id=None):
+    trusted = _optional_trusted_store_id(store_id)
+    if trusted is None:
+        return run_traced_query(
+            """
+            SELECT c.customer_id, c.full_name, c.phone, l.loan_type,
+                   l.current_balance, l.collateral_value,
+                   ROUND((l.current_balance / l.collateral_value) * 100, 2) AS ltv_percent,
+                   l.next_due_date
+            FROM customers c
+            JOIN loans l ON c.customer_id = l.customer_id
+            WHERE (l.current_balance / l.collateral_value) * 100 >= %s
+            ORDER BY ltv_percent DESC
+            """,
+            (ltv_threshold,),
+            {
+                "customers": ["customer_id", "full_name", "phone"],
+                "loans": TABLES["loans"],
+            },
+        )
     return run_traced_query(
         """
         SELECT c.customer_id, c.full_name, c.phone, l.loan_type,
@@ -459,17 +512,46 @@ def get_high_risk_loans(ltv_threshold: float = 75.0):
         FROM customers c
         JOIN loans l ON c.customer_id = l.customer_id
         WHERE (l.current_balance / l.collateral_value) * 100 >= %s
+          AND c.store_id = %s
+          AND l.store_id = %s
         ORDER BY ltv_percent DESC
         """,
-        (ltv_threshold,),
+        (ltv_threshold, trusted, trusted),
         {
-            "customers": ["customer_id", "full_name", "phone"],
+            "customers": ["customer_id", "full_name", "phone", "store_id"],
             "loans": TABLES["loans"],
         },
     )
 
 
-def get_collateral_at_risk():
+def get_collateral_at_risk(store_id=None):
+    trusted = _optional_trusted_store_id(store_id)
+    if trusted is None:
+        return run_traced_query(
+            """
+            SELECT c.full_name, c.phone, l.loan_type, ci.item_description,
+                   ci.appraised_value, ci.item_status, ci.forfeiture_date,
+                   ROUND((l.current_balance / l.collateral_value) * 100, 2) AS ltv_percent
+            FROM collateral_items ci
+            JOIN loans l ON ci.loan_id = l.loan_id
+            JOIN customers c ON l.customer_id = c.customer_id
+            WHERE ci.forfeiture_date <= DATE_ADD(CURDATE(), INTERVAL 30 DAY)
+               OR (l.current_balance / l.collateral_value) * 100 >= 75
+            ORDER BY ci.forfeiture_date ASC
+            """,
+            None,
+            {
+                "collateral_items": TABLES["collateral_items"],
+                "loans": [
+                    "loan_id",
+                    "customer_id",
+                    "loan_type",
+                    "current_balance",
+                    "collateral_value",
+                ],
+                "customers": ["customer_id", "full_name", "phone"],
+            },
+        )
     return run_traced_query(
         """
         SELECT c.full_name, c.phone, l.loan_type, ci.item_description,
@@ -478,15 +560,26 @@ def get_collateral_at_risk():
         FROM collateral_items ci
         JOIN loans l ON ci.loan_id = l.loan_id
         JOIN customers c ON l.customer_id = c.customer_id
-        WHERE ci.forfeiture_date <= DATE_ADD(CURDATE(), INTERVAL 30 DAY)
-           OR (l.current_balance / l.collateral_value) * 100 >= 75
+        WHERE (
+            ci.forfeiture_date <= DATE_ADD(CURDATE(), INTERVAL 30 DAY)
+            OR (l.current_balance / l.collateral_value) * 100 >= 75
+        )
+          AND ci.store_id = %s
+          AND l.store_id = %s
+          AND c.store_id = %s
         ORDER BY ci.forfeiture_date ASC
         """,
-        None,
+        (trusted, trusted, trusted),
         {
             "collateral_items": TABLES["collateral_items"],
-            "loans": ["loan_id", "customer_id", "loan_type", "current_balance", "collateral_value"],
-            "customers": ["customer_id", "full_name", "phone"],
+            "loans": [
+                "loan_id",
+                "customer_id",
+                "loan_type",
+                "current_balance",
+                "collateral_value",
+            ],
+            "customers": ["customer_id", "full_name", "phone", "store_id"],
         },
     )
 
@@ -502,32 +595,92 @@ def get_today_priorities():
     }
 
 
-def get_dashboard_stats():
-    """Return portfolio counts for the operations dashboard (no LLM)."""
-    customer_rows = extract_rows(get_customer_count())
+def get_dashboard_stats(store_id=None):
+    """Return portfolio counts for the operations dashboard (no LLM).
+
+    When ``store_id`` is None, behavior matches the historical global dashboard.
+    When set to a trusted positive integer, every metric is store-scoped.
+    """
+    trusted = _optional_trusted_store_id(store_id)
+    customer_rows = extract_rows(get_customer_count(store_id=trusted))
     total_customers = int(customer_rows[0].get("count") or 0) if customer_rows else 0
     return {
         "total_customers": total_customers,
-        "overdue_payments": get_overdue_account_count(),
-        "high_risk_loans": len(extract_rows(get_high_risk_loans())),
-        "collateral_at_risk": len(extract_rows(get_collateral_at_risk())),
+        "overdue_payments": get_overdue_account_count(store_id=trusted),
+        "high_risk_loans": len(extract_rows(get_high_risk_loans(store_id=trusted))),
+        "collateral_at_risk": len(extract_rows(get_collateral_at_risk(store_id=trusted))),
     }
 
 
+def get_user_by_username(username: str) -> dict | None:
+    """Return one user row joined with store_name, or None."""
+    cleaned = (username or "").strip()
+    if not cleaned:
+        return None
+    rows = _execute(
+        """
+        SELECT
+            u.user_id,
+            u.store_id,
+            u.username,
+            u.password_hash,
+            u.display_name,
+            u.is_active,
+            s.store_name
+        FROM users u
+        JOIN stores s ON s.store_id = u.store_id
+        WHERE u.username = %s
+        LIMIT 1
+        """,
+        (cleaned,),
+    )
+    return rows[0] if rows else None
+
+
+def get_user_by_id(user_id: int) -> dict | None:
+    """Return one user row joined with store_name, or None."""
+    try:
+        normalized_id = int(user_id)
+    except (TypeError, ValueError):
+        return None
+    rows = _execute(
+        """
+        SELECT
+            u.user_id,
+            u.store_id,
+            u.username,
+            u.password_hash,
+            u.display_name,
+            u.is_active,
+            s.store_name
+        FROM users u
+        JOIN stores s ON s.store_id = u.store_id
+        WHERE u.user_id = %s
+        LIMIT 1
+        """,
+        (normalized_id,),
+    )
+    return rows[0] if rows else None
+
+
 REQUIRED_SCHEMA = {
-    "customers": ["customer_id", "full_name", "phone", "email"],
-    "accounts": ["customer_id", "account_type", "balance", "status"],
+    "stores": ["store_id", "store_name"],
+    "users": ["user_id", "store_id", "username", "password_hash", "is_active"],
+    "customers": ["customer_id", "store_id", "full_name", "phone", "email"],
+    "accounts": ["customer_id", "store_id", "account_type", "balance", "status"],
     "loans": [
         "loan_id",
         "customer_id",
+        "store_id",
         "loan_type",
         "current_balance",
         "collateral_value",
         "next_due_date",
     ],
-    "payments": ["loan_id", "amount_due", "amount_paid", "due_date"],
+    "payments": ["loan_id", "store_id", "amount_due", "amount_paid", "due_date"],
     "collateral_items": [
         "loan_id",
+        "store_id",
         "item_type",
         "item_description",
         "appraised_value",
@@ -574,8 +727,10 @@ def verify_schema():
     if errors:
         raise RuntimeError(
             "Database schema validation failed for "
-            f"'{db_name}'. Apply sql/setup_database.sql and "
-            "sql/telleriq_collateral_setup.sql, then restart.\n  - "
+            f"'{db_name}'. Apply sql/setup_database.sql, "
+            "sql/telleriq_collateral_setup.sql, and for existing "
+            "databases sql/phase1_multi_tenant_ownership.sql "
+            "(after sql/phase1_preflight_checks.sql), then restart.\n  - "
             + "\n  - ".join(errors)
         )
 

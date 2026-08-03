@@ -3,7 +3,7 @@ import os
 import sys
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, request
+from flask import Flask, g, jsonify, request
 from flask_cors import CORS
 
 load_dotenv()
@@ -14,12 +14,49 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 
+from auth import (
+    authenticate_username_password,
+    auth_gate_response,
+    clear_session,
+    configure_session,
+    load_request_identity,
+)
 from database import get_dashboard_stats, verify_schema
 from llm_chat import chat
+from tenant_sql import parse_trusted_store_id, tenancy_enforcement_enabled
 
 app = Flask(__name__)
 app.config["JSON_AS_ASCII"] = False
-CORS(app)
+configure_session(app)
+
+
+def _cors_allowed_origins() -> list[str]:
+    """Explicit browser origins allowed to send credentialed requests.
+
+    Never defaults to '*': credentialed CORS requires concrete origins.
+    """
+    raw = os.environ.get(
+        "CORS_ORIGINS",
+        "http://127.0.0.1:8000,http://localhost:8000",
+    )
+    return [origin.strip() for origin in raw.split(",") if origin.strip()]
+
+
+CORS(
+    app,
+    origins=_cors_allowed_origins(),
+    supports_credentials=True,
+)
+
+
+@app.before_request
+def _load_auth_identity():
+    # Populate trusted identity when a signed session exists.
+    # Does not block requests unless AUTH_REQUIRED is enabled.
+    load_request_identity()
+    blocked = auth_gate_response(request.path)
+    if blocked is not None:
+        return blocked
 
 
 @app.after_request
@@ -44,9 +81,42 @@ def health():
         return jsonify({"status": "error", "error": str(e)}), 503
 
 
+@app.route("/auth/login", methods=["POST"])
+def auth_login():
+    body = request.get_json(silent=True) or {}
+    username = body.get("username")
+    password = body.get("password")
+    # Intentionally ignore any client-supplied store_id / user_id.
+    profile = authenticate_username_password(username, password)
+    if profile is None:
+        return jsonify({"error": "Invalid username or password."}), 401
+    return jsonify({"user": profile})
+
+
+@app.route("/auth/logout", methods=["POST"])
+def auth_logout():
+    clear_session()
+    return jsonify({"ok": True})
+
+
+@app.route("/auth/me", methods=["GET"])
+def auth_me():
+    profile = load_request_identity()
+    if profile is None:
+        return jsonify({"error": "Not authenticated."}), 401
+    return jsonify({"user": profile})
+
+
 @app.route("/dashboard/stats", methods=["GET"])
 def dashboard_stats_endpoint():
     try:
+        # Never trust client-supplied store identity (query/body/headers).
+        if tenancy_enforcement_enabled():
+            trusted_store_id = parse_trusted_store_id(getattr(g, "store_id", None))
+            if trusted_store_id is None:
+                return jsonify({"error": "Authentication required."}), 401
+            return jsonify(get_dashboard_stats(store_id=trusted_store_id))
+        # TENANCY_ENFORCEMENT=0: preserve historical global dashboard behavior.
         return jsonify(get_dashboard_stats())
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -62,7 +132,11 @@ def chat_endpoint():
         return jsonify({"error": "message is required"}), 400
 
     try:
-        result = chat(message, history)
+        # Trusted store identity from authenticated session / g only.
+        # Never accept store_id from request JSON (Gemini must never control it).
+        body.pop("store_id", None)
+        trusted_store_id = getattr(g, "store_id", None)
+        result = chat(message, history, store_id=trusted_store_id)
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -79,6 +153,12 @@ def run_startup_checks():
         print(
             "WARNING: GEMINI_API_KEY is not set. Operational queries still work; "
             "general chat fallback will fail until a key is configured.",
+            file=sys.stderr,
+        )
+    if not (os.environ.get("SECRET_KEY") or "").strip():
+        print(
+            "WARNING: SECRET_KEY is not set. Using local development session "
+            "fallback. Set SECRET_KEY before shared or deployed use.",
             file=sys.stderr,
         )
     verify_schema()
