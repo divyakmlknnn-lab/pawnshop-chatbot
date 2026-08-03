@@ -2947,7 +2947,42 @@ async function sendMessage(text) {
             return;
         }
 
-        const result = await response.json();
+        const rawBody = await response.text();
+        let result;
+        try {
+            result = rawBody ? JSON.parse(rawBody) : {};
+        } catch (parseError) {
+            conversationHistory.pop();
+            renderConversation(
+                {
+                    question,
+                    replyHtml:
+                        "The request took too long or the server returned an unexpected response. Please try again.",
+                    format: "html",
+                }
+            );
+            console.error(parseError);
+            return;
+        }
+
+        if (!response.ok) {
+            conversationHistory.pop();
+            const serverMessage =
+                result &&
+                typeof result.error === "string" &&
+                result.error.trim() &&
+                !/[<>]/.test(result.error)
+                    ? result.error.trim()
+                    : "The server returned an error. Please try again.";
+            renderConversation(
+                {
+                    question,
+                    replyHtml: `Sorry, something went wrong: ${serverMessage}`,
+                    format: "html",
+                }
+            );
+            return;
+        }
 
         if (result.error) {
             conversationHistory.pop();
@@ -2981,7 +3016,7 @@ async function sendMessage(text) {
         renderConversation(
             {
                 question,
-                replyHtml: "Unable to reach the backend. Is Flask running on port 5000?",
+                replyHtml: "Unable to reach the server. Please try again.",
                 format: "html",
             }
         );
