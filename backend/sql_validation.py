@@ -297,6 +297,29 @@ def _strip_column_qualifiers(expression: str) -> str:
     return re.sub(rf"{_IDENTIFIER}\.{_IDENTIFIER}", r"\2", expression)
 
 
+def _strip_balanced_outer_parentheses(expression: str) -> str:
+    """Strip one or more layers of parentheses that wrap the entire expression."""
+    text = (expression or "").strip()
+    while len(text) >= 2 and text[0] == "(" and text[-1] == ")":
+        depth = 0
+        wraps_entire_expression = True
+        for index, char in enumerate(text):
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+                if depth == 0 and index != len(text) - 1:
+                    wraps_entire_expression = False
+                    break
+                if depth < 0:
+                    wraps_entire_expression = False
+                    break
+        if not wraps_entire_expression or depth != 0:
+            break
+        text = text[1:-1].strip()
+    return text
+
+
 def _match_aggregate(expression: str) -> tuple[str, str] | None:
     """Return (function_name, inner_expression) for a single top-level aggregate call."""
     match = re.match(
@@ -343,13 +366,20 @@ def _column_owner_tables(column_name: str, table_names: set[str]) -> set[str]:
 
 
 def _matching_computed_field(expression: str) -> str | None:
-    normalized_expression = _normalize_expression(expression)
-    stripped_expression = _normalize_expression(_strip_column_qualifiers(expression))
+    """Match an approved computed expression, ignoring outer parentheses and qualifiers."""
+    unwrapped = _strip_balanced_outer_parentheses(expression)
+    candidates = (
+        expression,
+        unwrapped,
+        _strip_column_qualifiers(expression),
+        _strip_column_qualifiers(unwrapped),
+        _strip_balanced_outer_parentheses(_strip_column_qualifiers(expression)),
+    )
+    normalized_candidates = {
+        _normalize_expression(candidate) for candidate in candidates if candidate
+    }
     for computed_name, approved_expression in _COMPUTED_EXPRESSIONS.items():
-        if (
-            normalized_expression == approved_expression
-            or stripped_expression == approved_expression
-        ):
+        if approved_expression in normalized_candidates:
             return computed_name
     return None
 

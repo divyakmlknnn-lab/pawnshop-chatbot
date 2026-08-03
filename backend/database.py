@@ -515,19 +515,23 @@ def get_dashboard_stats():
 
 
 REQUIRED_SCHEMA = {
-    "customers": ["customer_id", "full_name", "phone", "email"],
-    "accounts": ["customer_id", "account_type", "balance", "status"],
+    "stores": ["store_id", "store_name"],
+    "users": ["user_id", "store_id", "username", "password_hash", "is_active"],
+    "customers": ["customer_id", "store_id", "full_name", "phone", "email"],
+    "accounts": ["customer_id", "store_id", "account_type", "balance", "status"],
     "loans": [
         "loan_id",
         "customer_id",
+        "store_id",
         "loan_type",
         "current_balance",
         "collateral_value",
         "next_due_date",
     ],
-    "payments": ["loan_id", "amount_due", "amount_paid", "due_date"],
+    "payments": ["loan_id", "store_id", "amount_due", "amount_paid", "due_date"],
     "collateral_items": [
         "loan_id",
+        "store_id",
         "item_type",
         "item_description",
         "appraised_value",
@@ -574,8 +578,10 @@ def verify_schema():
     if errors:
         raise RuntimeError(
             "Database schema validation failed for "
-            f"'{db_name}'. Apply sql/setup_database.sql and "
-            "sql/telleriq_collateral_setup.sql, then restart.\n  - "
+            f"'{db_name}'. Apply sql/setup_database.sql, "
+            "sql/telleriq_collateral_setup.sql, and for existing "
+            "databases sql/phase1_multi_tenant_ownership.sql "
+            "(after sql/phase1_preflight_checks.sql), then restart.\n  - "
             + "\n  - ".join(errors)
         )
 
