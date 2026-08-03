@@ -514,6 +514,57 @@ def get_dashboard_stats():
     }
 
 
+def get_user_by_username(username: str) -> dict | None:
+    """Return one user row joined with store_name, or None."""
+    cleaned = (username or "").strip()
+    if not cleaned:
+        return None
+    rows = _execute(
+        """
+        SELECT
+            u.user_id,
+            u.store_id,
+            u.username,
+            u.password_hash,
+            u.display_name,
+            u.is_active,
+            s.store_name
+        FROM users u
+        JOIN stores s ON s.store_id = u.store_id
+        WHERE u.username = %s
+        LIMIT 1
+        """,
+        (cleaned,),
+    )
+    return rows[0] if rows else None
+
+
+def get_user_by_id(user_id: int) -> dict | None:
+    """Return one user row joined with store_name, or None."""
+    try:
+        normalized_id = int(user_id)
+    except (TypeError, ValueError):
+        return None
+    rows = _execute(
+        """
+        SELECT
+            u.user_id,
+            u.store_id,
+            u.username,
+            u.password_hash,
+            u.display_name,
+            u.is_active,
+            s.store_name
+        FROM users u
+        JOIN stores s ON s.store_id = u.store_id
+        WHERE u.user_id = %s
+        LIMIT 1
+        """,
+        (normalized_id,),
+    )
+    return rows[0] if rows else None
+
+
 REQUIRED_SCHEMA = {
     "stores": ["store_id", "store_name"],
     "users": ["user_id", "store_id", "username", "password_hash", "is_active"],

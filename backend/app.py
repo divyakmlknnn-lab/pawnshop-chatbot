@@ -14,12 +14,30 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 
+from auth import (
+    authenticate_username_password,
+    auth_gate_response,
+    clear_session,
+    configure_session,
+    load_request_identity,
+)
 from database import get_dashboard_stats, verify_schema
 from llm_chat import chat
 
 app = Flask(__name__)
 app.config["JSON_AS_ASCII"] = False
+configure_session(app)
 CORS(app)
+
+
+@app.before_request
+def _load_auth_identity():
+    # Populate trusted identity when a signed session exists.
+    # Does not block requests unless AUTH_REQUIRED is enabled.
+    load_request_identity()
+    blocked = auth_gate_response(request.path)
+    if blocked is not None:
+        return blocked
 
 
 @app.after_request
@@ -44,9 +62,36 @@ def health():
         return jsonify({"status": "error", "error": str(e)}), 503
 
 
+@app.route("/auth/login", methods=["POST"])
+def auth_login():
+    body = request.get_json(silent=True) or {}
+    username = body.get("username")
+    password = body.get("password")
+    # Intentionally ignore any client-supplied store_id / user_id.
+    profile = authenticate_username_password(username, password)
+    if profile is None:
+        return jsonify({"error": "Invalid username or password."}), 401
+    return jsonify({"user": profile})
+
+
+@app.route("/auth/logout", methods=["POST"])
+def auth_logout():
+    clear_session()
+    return jsonify({"ok": True})
+
+
+@app.route("/auth/me", methods=["GET"])
+def auth_me():
+    profile = load_request_identity()
+    if profile is None:
+        return jsonify({"error": "Not authenticated."}), 401
+    return jsonify({"user": profile})
+
+
 @app.route("/dashboard/stats", methods=["GET"])
 def dashboard_stats_endpoint():
     try:
+        # Phase 2: still global / unscoped. Do not pass store_id yet.
         return jsonify(get_dashboard_stats())
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -62,6 +107,7 @@ def chat_endpoint():
         return jsonify({"error": "message is required"}), 400
 
     try:
+        # Phase 2: do not pass store_id / user identity into chat yet.
         result = chat(message, history)
         return jsonify(result)
     except Exception as e:
@@ -79,6 +125,12 @@ def run_startup_checks():
         print(
             "WARNING: GEMINI_API_KEY is not set. Operational queries still work; "
             "general chat fallback will fail until a key is configured.",
+            file=sys.stderr,
+        )
+    if not (os.environ.get("SECRET_KEY") or "").strip():
+        print(
+            "WARNING: SECRET_KEY is not set. Using local development session "
+            "fallback. Set SECRET_KEY before shared or deployed use.",
             file=sys.stderr,
         )
     verify_schema()
