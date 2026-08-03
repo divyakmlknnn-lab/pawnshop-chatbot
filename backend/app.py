@@ -23,6 +23,7 @@ from auth import (
 )
 from database import get_dashboard_stats, verify_schema
 from llm_chat import chat
+from tenant_sql import parse_trusted_store_id, tenancy_enforcement_enabled
 
 app = Flask(__name__)
 app.config["JSON_AS_ASCII"] = False
@@ -91,7 +92,13 @@ def auth_me():
 @app.route("/dashboard/stats", methods=["GET"])
 def dashboard_stats_endpoint():
     try:
-        # Phase 2: still global / unscoped. Do not pass store_id yet.
+        # Never trust client-supplied store identity (query/body/headers).
+        if tenancy_enforcement_enabled():
+            trusted_store_id = parse_trusted_store_id(getattr(g, "store_id", None))
+            if trusted_store_id is None:
+                return jsonify({"error": "Authentication required."}), 401
+            return jsonify(get_dashboard_stats(store_id=trusted_store_id))
+        # TENANCY_ENFORCEMENT=0: preserve historical global dashboard behavior.
         return jsonify(get_dashboard_stats())
     except Exception as e:
         return jsonify({"error": str(e)}), 500

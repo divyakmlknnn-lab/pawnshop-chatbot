@@ -207,10 +207,14 @@ class AuthTests(unittest.TestCase):
 
     @patch("app.get_dashboard_stats", return_value={"total_customers": 5})
     def test_dashboard_remains_accessible_when_auth_required_off(self, mock_stats):
-        response = self.client.get("/dashboard/stats")
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.get_json()["total_customers"], 5)
-        mock_stats.assert_called_once_with()
+        os.environ["TENANCY_ENFORCEMENT"] = "0"
+        try:
+            response = self.client.get("/dashboard/stats")
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.get_json()["total_customers"], 5)
+            mock_stats.assert_called_once_with()
+        finally:
+            os.environ.pop("TENANCY_ENFORCEMENT", None)
 
     def test_auth_required_flag_blocks_chat_when_enabled(self):
         os.environ["AUTH_REQUIRED"] = "1"
