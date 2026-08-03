@@ -40,6 +40,41 @@ def auth_required_enabled() -> bool:
     }
 
 
+_ALLOWED_SAMESITE = frozenset({"Lax", "Strict", "None"})
+
+
+def resolve_session_cookie_samesite(raw: str | None = None) -> str:
+    """Return a Flask-compatible SESSION_COOKIE_SAMESITE value.
+
+    Allowed: Lax (default), Strict, None.
+    Invalid / blank values fall back to Lax (safe local default) and log a warning.
+
+    For cross-site HTTPS (e.g. Vercel → Render), set:
+      SESSION_COOKIE_SAMESITE=None
+      SESSION_COOKIE_SECURE=1
+    Browsers require Secure when SameSite=None; Secure remains independently
+    configured via SESSION_COOKIE_SECURE and is not forced here.
+    """
+    if raw is None:
+        raw = os.environ.get("SESSION_COOKIE_SAMESITE", "Lax")
+    cleaned = (raw or "").strip()
+    if not cleaned:
+        return "Lax"
+    normalized = {
+        "lax": "Lax",
+        "strict": "Strict",
+        "none": "None",
+    }.get(cleaned.lower())
+    if normalized is None or normalized not in _ALLOWED_SAMESITE:
+        logger.warning(
+            "Invalid SESSION_COOKIE_SAMESITE=%r; falling back to Lax. "
+            "Allowed values: Lax, Strict, None.",
+            cleaned,
+        )
+        return "Lax"
+    return normalized
+
+
 def configure_session(app: Flask) -> None:
     """Configure signed Flask sessions (8-hour lifetime)."""
     secret = (os.environ.get("SECRET_KEY") or "").strip()
@@ -52,9 +87,10 @@ def configure_session(app: Flask) -> None:
     app.config["SECRET_KEY"] = secret
     app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=8)
     app.config["SESSION_COOKIE_HTTPONLY"] = True
-    app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+    app.config["SESSION_COOKIE_SAMESITE"] = resolve_session_cookie_samesite()
     # Local HTTP POC: Secure cookies would block session on http://127.0.0.1.
-    # Production/cross-site HTTPS cookie policy is a later deployment change.
+    # Cross-site HTTPS deployments should set SESSION_COOKIE_SECURE=1 together
+    # with SESSION_COOKIE_SAMESITE=None.
     app.config["SESSION_COOKIE_SECURE"] = os.environ.get(
         "SESSION_COOKIE_SECURE", "0"
     ).strip().lower() in {"1", "true", "yes", "on"}

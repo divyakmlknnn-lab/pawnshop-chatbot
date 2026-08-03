@@ -9,7 +9,13 @@ from unittest.mock import patch
 os.environ.setdefault("SECRET_KEY", "test-secret-key-for-auth-suite")
 os.environ["AUTH_REQUIRED"] = "0"
 
-from auth import hash_password  # noqa: E402
+from flask import Flask  # noqa: E402
+
+from auth import (  # noqa: E402
+    configure_session,
+    hash_password,
+    resolve_session_cookie_samesite,
+)
 from app import app  # noqa: E402
 
 
@@ -227,6 +233,98 @@ class AuthTests(unittest.TestCase):
             self.assertIn("Authentication required", response.get_json()["error"])
         finally:
             os.environ["AUTH_REQUIRED"] = "0"
+
+
+class SessionCookieConfigTests(unittest.TestCase):
+    """SESSION_COOKIE_SAMESITE / SECURE resolution (no live MySQL)."""
+
+    def test_default_samesite_is_lax(self):
+        self.assertEqual(resolve_session_cookie_samesite(""), "Lax")
+        self.assertEqual(resolve_session_cookie_samesite(None), "Lax")
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("SESSION_COOKIE_SAMESITE", None)
+            self.assertEqual(resolve_session_cookie_samesite(), "Lax")
+            fresh = Flask("default-lax")
+            configure_session(fresh)
+            self.assertEqual(fresh.config["SESSION_COOKIE_SAMESITE"], "Lax")
+            self.assertTrue(fresh.config["SESSION_COOKIE_HTTPONLY"])
+            self.assertFalse(fresh.config["SESSION_COOKIE_SECURE"])
+
+    def test_explicit_none(self):
+        self.assertEqual(resolve_session_cookie_samesite("None"), "None")
+        self.assertEqual(resolve_session_cookie_samesite("none"), "None")
+        with patch.dict(
+            os.environ,
+            {
+                "SESSION_COOKIE_SAMESITE": "None",
+                "SESSION_COOKIE_SECURE": "1",
+                "SECRET_KEY": "test-secret-key-for-auth-suite",
+            },
+            clear=False,
+        ):
+            fresh = Flask("samesite-none")
+            configure_session(fresh)
+            self.assertEqual(fresh.config["SESSION_COOKIE_SAMESITE"], "None")
+            self.assertTrue(fresh.config["SESSION_COOKIE_SECURE"])
+            self.assertTrue(fresh.config["SESSION_COOKIE_HTTPONLY"])
+
+    def test_explicit_strict(self):
+        self.assertEqual(resolve_session_cookie_samesite("Strict"), "Strict")
+        with patch.dict(
+            os.environ,
+            {
+                "SESSION_COOKIE_SAMESITE": "Strict",
+                "SECRET_KEY": "test-secret-key-for-auth-suite",
+            },
+            clear=False,
+        ):
+            fresh = Flask("samesite-strict")
+            configure_session(fresh)
+            self.assertEqual(fresh.config["SESSION_COOKIE_SAMESITE"], "Strict")
+
+    def test_invalid_value_falls_back_to_lax(self):
+        self.assertEqual(resolve_session_cookie_samesite("Invalid"), "Lax")
+        self.assertEqual(resolve_session_cookie_samesite("laxx"), "Lax")
+        with patch.dict(
+            os.environ,
+            {
+                "SESSION_COOKIE_SAMESITE": "bogus",
+                "SECRET_KEY": "test-secret-key-for-auth-suite",
+            },
+            clear=False,
+        ):
+            fresh = Flask("samesite-invalid")
+            configure_session(fresh)
+            self.assertEqual(fresh.config["SESSION_COOKIE_SAMESITE"], "Lax")
+
+    def test_secure_flag_independent_of_samesite(self):
+        with patch.dict(
+            os.environ,
+            {
+                "SESSION_COOKIE_SAMESITE": "Lax",
+                "SESSION_COOKIE_SECURE": "1",
+                "SECRET_KEY": "test-secret-key-for-auth-suite",
+            },
+            clear=False,
+        ):
+            fresh = Flask("secure-with-lax")
+            configure_session(fresh)
+            self.assertEqual(fresh.config["SESSION_COOKIE_SAMESITE"], "Lax")
+            self.assertTrue(fresh.config["SESSION_COOKIE_SECURE"])
+
+        with patch.dict(
+            os.environ,
+            {
+                "SESSION_COOKIE_SAMESITE": "None",
+                "SESSION_COOKIE_SECURE": "0",
+                "SECRET_KEY": "test-secret-key-for-auth-suite",
+            },
+            clear=False,
+        ):
+            fresh = Flask("none-without-secure")
+            configure_session(fresh)
+            self.assertEqual(fresh.config["SESSION_COOKIE_SAMESITE"], "None")
+            self.assertFalse(fresh.config["SESSION_COOKIE_SECURE"])
 
 
 if __name__ == "__main__":
