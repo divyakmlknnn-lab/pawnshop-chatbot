@@ -768,9 +768,89 @@
         }
 
         .copilot-body.typing {
+            color: var(--color-text-muted);
+            font-style: normal;
+        }
+
+        .chat-loading {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            padding: 2px 0;
+        }
+
+        .chat-loading-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            min-height: 1.5em;
+        }
+
+        .chat-loading-dots {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            flex-shrink: 0;
+        }
+
+        .chat-loading-dots span {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--color-gold-muted);
+            opacity: 0.35;
+            animation: chat-dot-pulse 1.2s ease-in-out infinite;
+        }
+
+        .chat-loading-dots span:nth-child(2) {
+            animation-delay: 0.18s;
+        }
+
+        .chat-loading-dots span:nth-child(3) {
+            animation-delay: 0.36s;
+        }
+
+        @keyframes chat-dot-pulse {
+            0%, 100% { opacity: 0.3; transform: translateY(0); }
+            50% { opacity: 1; transform: translateY(-1px); }
+        }
+
+        .chat-loading-status {
+            color: var(--color-charcoal);
+            font-size: 15px;
+            font-weight: 500;
+            letter-spacing: -0.01em;
+            line-height: 1.45;
+        }
+
+        .chat-loading-caption {
+            margin: 0;
+            padding-left: 23px;
             color: var(--color-brown-muted);
-            font-style: italic;
-            animation: pulse-soft 1.2s ease-in-out infinite;
+            font-size: 12.5px;
+            line-height: 1.4;
+        }
+
+        .send-btn:disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+
+        .send-btn:disabled:hover {
+            background: var(--color-charcoal);
+            box-shadow: none;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .chat-loading-dots span {
+                animation: none;
+                opacity: 0.7;
+            }
+
+            .copilot-body.typing {
+                animation: none;
+            }
         }
 
         .copilot-response {
@@ -1731,6 +1811,23 @@ let uiTurns = [];
 let currentUser = null;
 const DEBUG_MODE = new URLSearchParams(window.location.search).get("debug") === "1";
 
+/** Ephemeral chat request loading — never persisted to localStorage. */
+const CHAT_LOADING_STAGES = [
+    { afterMs: 0, text: "Thinking it through…" },
+    { afterMs: 3000, text: "Checking the details…" },
+    { afterMs: 7000, text: "Putting the pieces together…" },
+    { afterMs: 12000, text: "Just a little more…" },
+    { afterMs: 18000, text: "Almost there…" },
+    { afterMs: 25000, text: "Still working — this one's a bit deeper…" },
+    { afterMs: 35000, text: "Right around the corner…" },
+    { afterMs: 50000, text: "Thanks for hanging in there — finishing up now…" },
+];
+const CHAT_LOADING_CAPTION = "Complex portfolio questions can take a little longer.";
+let chatRequestActive = false;
+let chatRequestGeneration = 0;
+let chatLoadingTickId = null;
+let chatLoadingStartedAt = 0;
+
 function resolveApiBase() {
     const host = window.location.hostname;
     if (host === "127.0.0.1" || host === "localhost") {
@@ -1815,6 +1912,86 @@ function clearInMemoryConversation() {
     uiTurns = [];
 }
 
+function getChatLoadingMessage(elapsedMs) {
+    let message = CHAT_LOADING_STAGES[0].text;
+    for (let i = 0; i < CHAT_LOADING_STAGES.length; i += 1) {
+        if (elapsedMs >= CHAT_LOADING_STAGES[i].afterMs) {
+            message = CHAT_LOADING_STAGES[i].text;
+        } else {
+            break;
+        }
+    }
+    return message;
+}
+
+function buildChatLoadingMarkup(statusText) {
+    const status = String(statusText || CHAT_LOADING_STAGES[0].text);
+    return (
+        `<div class="chat-loading" aria-live="polite" aria-busy="true">` +
+        `<div class="chat-loading-row">` +
+        `<span class="chat-loading-dots" aria-hidden="true">` +
+        `<span></span><span></span><span></span>` +
+        `</span>` +
+        `<span class="chat-loading-status">${status}</span>` +
+        `</div>` +
+        `<p class="chat-loading-caption">${CHAT_LOADING_CAPTION}</p>` +
+        `</div>`
+    );
+}
+
+function stopChatLoadingTimers() {
+    if (chatLoadingTickId !== null) {
+        clearInterval(chatLoadingTickId);
+        chatLoadingTickId = null;
+    }
+    chatLoadingStartedAt = 0;
+}
+
+function setChatSendBusy(busy) {
+    const sendBtn = document.querySelector(".send-btn");
+    if (sendBtn) {
+        sendBtn.disabled = Boolean(busy);
+        sendBtn.setAttribute("aria-disabled", busy ? "true" : "false");
+    }
+}
+
+function invalidateChatRequest() {
+    chatRequestGeneration += 1;
+    chatRequestActive = false;
+    stopChatLoadingTimers();
+    setChatSendBusy(false);
+}
+
+function updateChatLoadingStatus() {
+    if (!chatRequestActive || chatLoadingStartedAt <= 0) {
+        return;
+    }
+    const statusEl = document.querySelector(
+        "#answer .copilot-panel .chat-loading-status"
+    );
+    if (!statusEl) {
+        return;
+    }
+    const next = getChatLoadingMessage(performance.now() - chatLoadingStartedAt);
+    if (statusEl.textContent !== next) {
+        statusEl.textContent = next;
+    }
+}
+
+function startChatLoading(question) {
+    stopChatLoadingTimers();
+    chatLoadingStartedAt = performance.now();
+    renderConversation(
+        {
+            question,
+            replyHtml: buildChatLoadingMarkup(getChatLoadingMessage(0)),
+            format: "html",
+        },
+        { typing: true }
+    );
+    chatLoadingTickId = window.setInterval(updateChatLoadingStatus, 400);
+}
+
 function publicUserProfile(user) {
     if (!user || typeof user !== "object") {
         return null;
@@ -1852,6 +2029,7 @@ async function apiFetch(path, options = {}) {
 }
 
 function handleSessionExpired() {
+    invalidateChatRequest();
     currentUser = null;
     clearInMemoryConversation();
     updateHeaderUser();
@@ -1865,6 +2043,7 @@ async function enterAuthenticatedSession(user) {
         showLoginGate("Unable to establish a trusted session profile.");
         return;
     }
+    invalidateChatRequest();
     clearInMemoryConversation();
     currentUser = profile;
     showAuthenticatedApp();
@@ -1884,6 +2063,7 @@ async function refreshAuthSession() {
             headers: { Accept: "application/json" },
         });
         if (response.status === 401) {
+            invalidateChatRequest();
             currentUser = null;
             clearInMemoryConversation();
             showLoginGate("");
@@ -1947,6 +2127,7 @@ async function handleLoginSubmit(event) {
 }
 
 async function handleLogout() {
+    invalidateChatRequest();
     try {
         await apiFetch("/auth/logout", {
             method: "POST",
@@ -2176,6 +2357,7 @@ function restoreEmptyState() {
 }
 
 function clearConversation() {
+    invalidateChatRequest();
     conversationHistory = [];
     uiTurns = [];
     const key = chatStorageKey();
@@ -2225,7 +2407,7 @@ function appendAnswerPanel(turn, options = {}) {
     const polishedReply = polishReplyCopy(turn.replyHtml);
     const { businessHtml, recommendedHtml } = splitReplyContent(polishedReply);
 
-    if (recommendedHtml) {
+    if (recommendedHtml && !options.typing) {
         const enhancedRecommended = enhanceRecommendedActionHtml(recommendedHtml, queryDetails);
         panel.appendChild(createViewCard("Recommended Action", enhancedRecommended, false, "action"));
     }
@@ -2236,7 +2418,8 @@ function appendAnswerPanel(turn, options = {}) {
         body.className = `copilot-body${options.typing ? " typing" : ""}`;
         const format = turn.format || "html";
         if (options.typing) {
-            body.textContent = turn.replyHtml || "Loading...";
+            // Ephemeral loader markup only — never written to conversationHistory/uiTurns.
+            body.innerHTML = turn.replyHtml || buildChatLoadingMarkup(getChatLoadingMessage(0));
         } else if (format === "html") {
             body.innerHTML = businessHtml;
         } else {
@@ -2911,26 +3094,25 @@ function setAnswerContent(question, reply, debugInfo = null, options = {}) {
 }
 
 function showTyping(question) {
-    renderConversation(
-        {
-            question,
-            replyHtml: "Loading...",
-            format: "text",
-        },
-        { typing: true }
-    );
+    startChatLoading(question);
 }
 
 async function sendMessage(text) {
     const question = text.trim();
     if (!question) return;
+    if (chatRequestActive) return;
     if (!currentUser) {
         showLoginGate("Session expired. Please sign in again.");
         return;
     }
 
+    const requestGeneration = ++chatRequestGeneration;
+    chatRequestActive = true;
+    setChatSendBusy(true);
     conversationHistory.push({ role: "user", content: question });
-    showTyping(question);
+    startChatLoading(question);
+
+    const isCurrentRequest = () => requestGeneration === chatRequestGeneration;
 
     try {
         const response = await apiFetch("/chat", {
@@ -2942,17 +3124,27 @@ async function sendMessage(text) {
             }),
         });
 
+        if (!isCurrentRequest()) {
+            return;
+        }
+
         if (response.status === 401) {
             conversationHistory.pop();
+            // handleSessionExpired already cleared loader/UI via invalidateChatRequest.
             return;
         }
 
         const rawBody = await response.text();
+        if (!isCurrentRequest()) {
+            return;
+        }
+
         let result;
         try {
             result = rawBody ? JSON.parse(rawBody) : {};
         } catch (parseError) {
             conversationHistory.pop();
+            stopChatLoadingTimers();
             renderConversation(
                 {
                     question,
@@ -2974,6 +3166,7 @@ async function sendMessage(text) {
                 !/[<>]/.test(result.error)
                     ? result.error.trim()
                     : "The server returned an error. Please try again.";
+            stopChatLoadingTimers();
             renderConversation(
                 {
                     question,
@@ -2986,6 +3179,7 @@ async function sendMessage(text) {
 
         if (result.error) {
             conversationHistory.pop();
+            stopChatLoadingTimers();
             renderConversation(
                 {
                     question,
@@ -3009,10 +3203,15 @@ async function sendMessage(text) {
             queryDetails: result.query_details || null,
         });
         saveConversation();
+        stopChatLoadingTimers();
         renderConversation();
 
     } catch (error) {
+        if (!isCurrentRequest()) {
+            return;
+        }
         conversationHistory.pop();
+        stopChatLoadingTimers();
         renderConversation(
             {
                 question,
@@ -3021,10 +3220,17 @@ async function sendMessage(text) {
             }
         );
         console.error(error);
+    } finally {
+        if (isCurrentRequest()) {
+            stopChatLoadingTimers();
+            chatRequestActive = false;
+            setChatSendBusy(false);
+        }
     }
 }
 
 function sendQuestion() {
+    if (chatRequestActive) return;
     const input = document.getElementById("userQuestion");
     const text = input.value.trim();
     if (!text) {
